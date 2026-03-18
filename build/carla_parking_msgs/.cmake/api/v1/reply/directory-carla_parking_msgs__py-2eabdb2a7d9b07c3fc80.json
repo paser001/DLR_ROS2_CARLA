@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "carla_parking_msgs__py",
+		"source" : "/home/student/carla_ros2_ws/build/carla_parking_msgs/carla_parking_msgs__py"
+	}
+}

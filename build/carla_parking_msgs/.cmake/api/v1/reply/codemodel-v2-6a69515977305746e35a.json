@@ -1,0 +1,233 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-c8691cc4f75221d744dc.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17
+					]
+				},
+				{
+					"build" : "carla_parking_msgs__py",
+					"jsonFile" : "directory-carla_parking_msgs__py-2eabdb2a7d9b07c3fc80.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/home/student/carla_ros2_ws/build/carla_parking_msgs/carla_parking_msgs__py",
+					"targetIndexes" : 
+					[
+						4
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1
+					],
+					"name" : "carla_parking_msgs",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_build_carla_parking_msgs_egg::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_build_carla_parking_msgs_egg-fc07b0d6e9659c11c626.json",
+					"name" : "ament_cmake_python_build_carla_parking_msgs_egg",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_copy_carla_parking_msgs::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_copy_carla_parking_msgs-41c34150cfd2b8bf83ad.json",
+					"name" : "ament_cmake_python_copy_carla_parking_msgs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs-30287a2eadbcc9c119b3.json",
+					"name" : "carla_parking_msgs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__cpp-c707db809ab12102e3dd.json",
+					"name" : "carla_parking_msgs__cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "carla_parking_msgs__py::@4126c1d9b58acba2c8a1",
+					"jsonFile" : "target-carla_parking_msgs__py-3bd403d99f061ed8a5c8.json",
+					"name" : "carla_parking_msgs__py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_generator_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_generator_c-28faa0ae8480055d23f0.json",
+					"name" : "carla_parking_msgs__rosidl_generator_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_generator_py::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_generator_py-d0c78452ddaac80d3dee.json",
+					"name" : "carla_parking_msgs__rosidl_generator_py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_typesupport_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_typesupport_c-19a454fc2fdc89ad2aae.json",
+					"name" : "carla_parking_msgs__rosidl_typesupport_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_typesupport_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_typesupport_c__pyext-f2c65935ae3488d4abca.json",
+					"name" : "carla_parking_msgs__rosidl_typesupport_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_typesupport_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_typesupport_cpp-2695c8118c167334084b.json",
+					"name" : "carla_parking_msgs__rosidl_typesupport_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_typesupport_fastrtps_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_typesupport_fastrtps_c-0585553886a1ecb4142b.json",
+					"name" : "carla_parking_msgs__rosidl_typesupport_fastrtps_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_typesupport_fastrtps_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_typesupport_fastrtps_c__pyext-f6e0e75e3bb45e6c70fe.json",
+					"name" : "carla_parking_msgs__rosidl_typesupport_fastrtps_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_typesupport_fastrtps_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_typesupport_fastrtps_cpp-d2f4034d489f824fdcd1.json",
+					"name" : "carla_parking_msgs__rosidl_typesupport_fastrtps_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_typesupport_introspection_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_typesupport_introspection_c-b27e8df78c6a5e385301.json",
+					"name" : "carla_parking_msgs__rosidl_typesupport_introspection_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_typesupport_introspection_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_typesupport_introspection_c__pyext-4dcfbdd17d1880f01b8a.json",
+					"name" : "carla_parking_msgs__rosidl_typesupport_introspection_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs__rosidl_typesupport_introspection_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs__rosidl_typesupport_introspection_cpp-30505b6cd822843374ef.json",
+					"name" : "carla_parking_msgs__rosidl_typesupport_introspection_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "carla_parking_msgs_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-carla_parking_msgs_uninstall-4ebce13d3fefb19b8143.json",
+					"name" : "carla_parking_msgs_uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-5431722fcfa71d8db211.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/student/carla_ros2_ws/build/carla_parking_msgs",
+		"source" : "/home/student/carla_ros2_ws/src/carla_parking_msgs"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}
