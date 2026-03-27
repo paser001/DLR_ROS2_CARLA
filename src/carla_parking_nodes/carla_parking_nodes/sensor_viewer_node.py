@@ -17,22 +17,21 @@ from sensor_msgs_py import point_cloud2
 
 LIDAR_IMG_SIZE = 700
 LIDAR_RANGE_M = 30.0
-LIDAR_HISTORY_LENGTH = 8
+LIDAR_HISTORY_LENGTH = 2
 
-# Same extrinsics used in your CARLA interface node
-# URDF convention: x forward, y left, z up
+LIDAR_OFFSET= -0.0
+
+VEH_X_MIN = -3.4*0.623
+VEH_X_MAX = 3.4*0.623
+VEH_Y_MIN = -2.6*0.623
+VEH_Y_MAX = 2.6*0.623
+
+
+
 LIDAR_LAYOUT = {
-    'front_lidar': {
-        'xyz': (0.486, 0.0, 0.51),
-        'rpy': (0.007, -0.05, 0.00735),
-    },
-    'rear_left_lidar': {
-        'xyz': (-0.671, 0.839, 0.402),
-        'rpy': (0.021, 0.019, 2.125),
-    },
-    'rear_right_lidar': {
-        'xyz': (-0.671, -0.839, 0.402),
-        'rpy': (0.0, -0.007, -2.101),
+    'seyond6': {
+        "xyz": (0.6, -0.20, 0.55),
+        "rpy": (0.0, 0.0, 0.0),
     },
 }
 
@@ -48,14 +47,13 @@ class SensorViewerNode(Node):
         self.latest_lidar_points_vehicle: Dict[str, np.ndarray] = {}
 
         self.camera_topics = {
-            'front_left_rgb': '/sensors/front_left_rgb/image_raw',
-            'front_right_rgb': '/sensors/front_right_rgb/image_raw',
+            'dalsa2': '/sensors/dalsa2_rgb/image_raw',
+            'leopard4': '/sensors/leopard4_rgb/image_raw',
+            'leopard5': '/sensors/leopard5_rgb/image_raw',
         }
 
         self.lidar_topics = {
-            'front_lidar': '/sensors/front_lidar/points',
-            'rear_left_lidar': '/sensors/rear_left_lidar/points',
-            'rear_right_lidar': '/sensors/rear_right_lidar/points',
+            'seyond6': '/sensors/seyond6/points',
         }
 
         self.lidar_history_length = LIDAR_HISTORY_LENGTH
@@ -88,12 +86,12 @@ class SensorViewerNode(Node):
             self.get_logger().info(f'Subscribed to lidar topic: {topic}')
 
         for name in self.camera_topics.keys():
-            cv2.namedWindow(name, cv2.WINDOW_AUTOSIZE)
+            cv2.namedWindow(name, cv2.WINDOW_NORMAL)
 
         for name in self.lidar_topics.keys():
-            cv2.namedWindow(f'{name}_bev', cv2.WINDOW_AUTOSIZE)
+            cv2.namedWindow(f'{name}_lidar', cv2.WINDOW_AUTOSIZE)
 
-        cv2.namedWindow('surround_lidar_bev', cv2.WINDOW_AUTOSIZE)
+        cv2.namedWindow('surround_lidar_fused', cv2.WINDOW_AUTOSIZE)
 
         self.display_timer = self.create_timer(0.03, self.display_loop)
 
@@ -147,6 +145,48 @@ class SensorViewerNode(Node):
             self.get_logger().warn(f'Lidar callback failed for {sensor_name}: {e}')
 
 
+    def count_points_in_box_from_pts(self, pts: np.ndarray, x_min, x_max, y_min, y_max) -> int:
+        if pts is None or len(pts) == 0:
+            return 0
+
+        x = pts[:, 0]
+        y = pts[:, 1]
+
+        mask = (x >= x_min) & (x <= x_max) & (y >= y_min) & (y <= y_max)
+        return int(np.count_nonzero(mask))
+    
+    def draw_controller_safety_boxes(self, img: np.ndarray, pts: np.ndarray = None):
+        
+
+        zones = [
+            ("front", VEH_X_MAX, VEH_X_MAX + 2.2, -3.0, 3.0, (0, 0, 255)),
+            ("rear", VEH_X_MIN - 2.2, VEH_X_MIN, -3.0, 3.0, (255, 0, 0)),
+
+            ("fr", 2.8, 5.0, 2.6, 3.8, (255, 255, 0)),
+            ("fl", 2.8, 5.0, -3.8, -2.6, (0, 255, 255)),
+
+            ("rr", -5.5, -2.0, 2.6, 3.8, (0, 255, 0)),
+            ("rl", -5.5, -2.0, -3.8, -2.6, (255, 0, 255)),
+        ]
+
+        for name, x_min, x_max, y_min, y_max, color in zones:
+            self.draw_box_on_bev(
+                img,
+                x_min=x_min,
+                x_max=x_max,
+                y_min=y_min,
+                y_max=y_max,
+                color=color,
+                thickness=2
+            )
+
+            label = name
+            if pts is not None:
+                count = self.count_points_in_box_from_pts(pts, x_min, x_max, y_min, y_max)
+                label = f'{name}:{count}'
+                # print(label)
+
+            
 
     def urdf_pose_to_vehicle_frame(self, xyz, rpy):
         """
@@ -165,7 +205,6 @@ class SensorViewerNode(Node):
         yaw_v = -yaw_u
 
         return (x_v, y_v, z_v), (roll_v, pitch_v, yaw_v)
-
 
     def transform_points_to_vehicle_frame(self, pts: np.ndarray, sensor_name: str) -> np.ndarray:
         if sensor_name not in LIDAR_LAYOUT:
@@ -209,8 +248,9 @@ class SensorViewerNode(Node):
 
         n = len(pts_history)
         if n == 0:
-            self.draw_ego_marker(bev)
-            self.draw_parking_safety_boxes(bev)
+            # self.draw_ego_marker(bev)
+            # self.draw_candidate_vehicle_boxes(bev)
+            # self.draw_parking_safety_boxes(bev)
             return bev
 
         for i, pts in enumerate(pts_history):
@@ -242,8 +282,9 @@ class SensorViewerNode(Node):
             brightness = int(60 + 195 * (i + 1) / max(n, 1))
             bev[py, px] = (brightness, brightness, brightness)
 
-        self.draw_ego_marker(bev)
-        self.draw_parking_safety_boxes(bev)
+        # self.draw_ego_marker(bev)
+        # self.draw_candidate_vehicle_boxes(bev)
+        # self.draw_parking_safety_boxes(bev)
 
         return bev
 
@@ -254,54 +295,51 @@ class SensorViewerNode(Node):
 
         bev = np.zeros((img_size, img_size, 3), dtype=np.uint8)
 
-        colors = {
-            'front_lidar': (255, 255, 255),
-            'rear_left_lidar': (0, 255, 255),
-            'rear_right_lidar': (255, 0, 255),
-        }
+        sensor_name = 'seyond6'
+        history_list = list(self.lidar_history.get(sensor_name, []))
+        n = len(history_list)
 
-        for sensor_name, history in self.lidar_history.items():
-            color = colors.get(sensor_name, (200, 200, 200))
-            history_list = list(history)
-            n = len(history_list)
+        color = (255, 255, 255)
 
-            for i, pts in enumerate(history_list):
-                if pts is None or pts.size == 0:
-                    continue
+        for i, pts in enumerate(history_list):
+            if pts is None or pts.size == 0:
+                continue
 
-                x = pts[:, 0]
-                y = pts[:, 1]
+            x = pts[:, 0]
+            y = pts[:, 1]
 
-                mask = (
-                    (x >= -lidar_range) & (x <= lidar_range) &
-                    (y >= -lidar_range) & (y <= lidar_range)
-                )
+            mask = (
+                (x >= -lidar_range) & (x <= lidar_range) &
+                (y >= -lidar_range) & (y <= lidar_range)
+            )
 
-                x = x[mask]
-                y = y[mask]
+            x = x[mask]
+            y = y[mask]
 
-                px = (img_size / 2 + y * scale).astype(np.int32)
-                py = (img_size / 2 - x * scale).astype(np.int32)
+            px = (img_size / 2 + y * scale).astype(np.int32)
+            py = (img_size / 2 - x * scale).astype(np.int32)
 
-                valid = (
-                    (px >= 0) & (px < img_size) &
-                    (py >= 0) & (py < img_size)
-                )
+            valid = (
+                (px >= 0) & (px < img_size) &
+                (py >= 0) & (py < img_size)
+            )
 
-                px = px[valid]
-                py = py[valid]
+            px = px[valid]
+            py = py[valid]
 
-                fade = 0.35 + 0.65 * (i + 1) / max(n, 1)
-                draw_color = (
-                    int(color[0] * fade),
-                    int(color[1] * fade),
-                    int(color[2] * fade),
-                )
+            fade = 0.35 + 0.65 * (i + 1) / max(n, 1)
+            draw_color = (
+                int(color[0] * fade),
+                int(color[1] * fade),
+                int(color[2] * fade),
+            )
 
-                bev[py, px] = draw_color
+            bev[py, px] = draw_color
 
-        self.draw_ego_marker(bev)
-        self.draw_parking_safety_boxes(bev)
+        self.draw_candidate_vehicle_boxes(bev)
+
+        latest_pts = self.latest_lidar_points_vehicle.get('seyond6', None)
+        # self.draw_controller_safety_boxes(bev, latest_pts)
 
         return bev
 
@@ -313,11 +351,11 @@ class SensorViewerNode(Node):
     def draw_box_on_bev(self, img, x_min, x_max, y_min, y_max, color=(0, 0, 255), thickness=2):
         img_size = img.shape[0]
         scale = img_size / (2.0 * LIDAR_RANGE_M)
-        center = img_size // 2
+        center = (img_size // 2)
 
         def to_px(x, y):
             px = int(center + y * scale)
-            py = int(center - x * scale)
+            py = int(center - (x + LIDAR_OFFSET) * scale)
             return px, py
 
         p1 = to_px(x_min, y_min)
@@ -329,6 +367,49 @@ class SensorViewerNode(Node):
         cv2.line(img, p2, p3, color, thickness)
         cv2.line(img, p3, p4, color, thickness)
         cv2.line(img, p4, p1, color, thickness)
+
+    def draw_text_at_vehicle_coords(self, img: np.ndarray, x: float, y: float, text: str, color=(255, 255, 255)):
+        img_size = img.shape[0]
+        scale = img_size / (2.0 * LIDAR_RANGE_M)
+        center = img_size // 2
+
+        px = int(center + y * scale)
+        py = int(center - x * scale)
+
+        cv2.putText(
+            img,
+            text,
+            (px + 4, py - 4),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            1,
+            cv2.LINE_AA
+        )
+
+    def draw_candidate_vehicle_boxes(self, img: np.ndarray):
+        boxes = [
+            (-3.4,  3.4, -2.6, 2.6, (0, 255, 0),     "ushift"),
+        ]
+
+        for x_min, x_max, y_min, y_max, color, label in boxes:
+            self.draw_box_on_bev(
+                img,
+                x_min=x_min,
+                x_max=x_max,
+                y_min=y_min,
+                y_max=y_max,
+                color=color,
+                thickness=2
+            )
+
+            self.draw_text_at_vehicle_coords(
+                img,
+                x=x_max,
+                y=y_min,
+                text=label,
+                color=color
+            )
 
     def draw_parking_safety_boxes(self, img: np.ndarray):
         self.draw_box_on_bev(
@@ -357,13 +438,15 @@ class SensorViewerNode(Node):
 
     def display_loop(self):
         for name, img in self.latest_images.items():
-            cv2.imshow(name, img)
+            display_img = cv2.resize(img, (640, 480))
+            cv2.imshow(name, display_img)
+            # cv2.imshow(name, img)
 
         for name, bev in self.latest_lidar_bev.items():
-            cv2.imshow(f'{name}_bev', bev)
+            cv2.imshow(f'{name}_lidar', bev)
 
         fused = self.fused_lidar_history_to_bev()
-        cv2.imshow('surround_lidar_bev', fused)
+        cv2.imshow('surround_lidar_fused', fused)
 
         key = cv2.waitKey(1)
         if key == 27:

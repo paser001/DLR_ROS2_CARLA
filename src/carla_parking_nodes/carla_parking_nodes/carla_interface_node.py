@@ -3,9 +3,10 @@
 import math
 import queue
 from typing import Dict, Optional
-
+import random
 import numpy as np
 import carla
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -13,53 +14,297 @@ from rclpy.qos import qos_profile_sensor_data
 
 from std_msgs.msg import String, Float32, Header
 from geometry_msgs.msg import PoseStamped
-from sensor_msgs.msg import Image, PointCloud2, PointField
+from sensor_msgs.msg import Image, PointCloud2, PointField, Imu
 from cv_bridge import CvBridge
 
 
 from carla_parking_msgs.msg import VehicleControl
 
+SENSOR_DEBUG_FLAG = False
 
-IM_WIDTH = 640
-IM_HEIGHT = 480
+# CAMERA PARAMS
+IM_WIDTH = 1936
+IM_HEIGHT = 1216
 
+#CARLA LOCATION TO GEOMETRICAL MIDDLE
+VEH_WIDTH = 4 * 0.623
+VEH_LENGTH = 6.85 * 0.623
+COM_OFFSET = -0.4
+
+# URDF TO CARLA OFFSET
+URDF_OFFSET_X = 0.33
+URDF_OFFSET_Z = 0.4
+
+
+# ARCH SPAWN PARAMETERS
+ARCH_SPAWN_FLAG = False
+CARGOBOX_COORDINATES = (290.9, -201.03)
+MIN_RAD= 7
+MAX_RAD= 17
+MIN_ANG= -30
+MAX_ANG= 30
+MAX_YAW = 15
 
 SENSOR_LAYOUT = {
-    "front_left_rgb": {
+
+    "leopard1": {
+        "type": "sensor.camera.rgb",
+        "xyz": (-0.655, -0.177, 0.350),
+        "rpy": (0.0, 0.0, 3.142),
+        "topic": "/sensors/leopard1_rgb/image_raw",
+        "frame_id": "leopard1_rgb_frame",
+        # rear center camera
+    },
+
+    "leopard2": {
+        "type": "sensor.camera.rgb",
+        "xyz": (0.597, -1.152, 0.380),
+        "rpy": (0.0, 0.0, 0.0),
+        "topic": "/sensors/leopard2_rgb/image_raw",
+        "frame_id": "leopard2_rgb_frame",
+        # right side camera
+    },
+
+    "leopard3": {
+        "type": "sensor.camera.rgb",
+        "xyz": (0.597, 1.152, 0.380),
+        "rpy": (0.0, 0.0, 0.0),
+        "topic": "/sensors/leopard3_rgb/image_raw",
+        "frame_id": "leopard3_rgb_frame",
+        # left side camera
+    },
+
+    "leopard4": {
         "type": "sensor.camera.rgb",
         "xyz": (3.198, -0.822, 0.442),
         "rpy": (0.0, 0.0, 0.0),
-        "topic": "/sensors/front_left_rgb/image_raw",
-        "frame_id": "front_left_rgb_frame",
+        "topic": "/sensors/leopard4_rgb/image_raw",
+        "frame_id": "leopard4_rgb_frame",
+        # front right camera
     },
-    "front_right_rgb": {
+
+    "leopard5": {
         "type": "sensor.camera.rgb",
         "xyz": (3.198, 0.822, 0.442),
         "rpy": (0.0, 0.0, 0.0),
-        "topic": "/sensors/front_right_rgb/image_raw",
-        "frame_id": "front_right_rgb_frame",
+        "topic": "/sensors/leopard5_rgb/image_raw",
+        "frame_id": "leopard5_rgb_frame",
+        # front left camera
     },
-    "front_lidar": {
+
+    "leopard6": {
+        "type": "sensor.camera.rgb",
+        "xyz": (0.545, 0.668, 0.466),
+        "rpy": (0.0, 0.0, 0.0),
+        "topic": "/sensors/leopard6_rgb/image_raw",
+        "frame_id": "leopard6_rgb_frame",
+        # front left corner camera
+    },
+
+    "leopard7": {
+        "type": "sensor.camera.rgb",
+        "xyz": (0.545, -0.668, 0.466),
+        "rpy": (0.0, 0.0, 0.0),
+        "topic": "/sensors/leopard7_rgb/image_raw",
+        "frame_id": "leopard7_rgb_frame",
+        # front right corner camera
+    },
+
+    "leopard8": {
+        "type": "sensor.camera.rgb",
+        "xyz": (-0.590, -1.078, 0.458),
+        "rpy": (0.0, 0.0, -2.133),
+        "topic": "/sensors/leopard8_rgb/image_raw",
+        "frame_id": "leopard8_rgb_frame",
+        # rear right camera
+    },
+
+    "leopard9": {
+        "type": "sensor.camera.rgb",
+        "xyz": (-0.590, 1.078, 0.458),
+        "rpy": (0.0, 0.0, 2.133),
+        "topic": "/sensors/leopard9_rgb/image_raw",
+        "frame_id": "leopard9_rgb_frame",
+        # rear left camera
+    },
+
+    "dalsa1": {
+        "type": "sensor.camera.rgb",
+        "xyz": (-0.444, -1.216, 0.532),
+        "rpy": (0.0, 0.0, -1.571),
+        "topic": "/sensors/dalsa1_rgb/image_raw",
+        "frame_id": "dalsa1_rgb_frame",
+        # rear right wide camera
+    },
+
+    "dalsa3": {
+        "type": "sensor.camera.rgb",
+        "xyz": (-0.444, 1.216, 0.532),
+        "rpy": (0.0, 0.0, 1.571),
+        "topic": "/sensors/dalsa3_rgb/image_raw",
+        "frame_id": "dalsa3_rgb_frame",
+        # rear left wide camera
+    },
+
+    "dalsa4": {
+        "type": "sensor.camera.rgb",
+        "xyz": (-0.677, 0.122, 0.311),
+        "rpy": (0.0, 0.0, 3.142),
+        "topic": "/sensors/dalsa4_rgb/image_raw",
+        "frame_id": "dalsa4_rgb_frame",
+        # rear center camera
+    },
+
+    # LIDAR
+    "ibeo1": {
         "type": "sensor.lidar.ray_cast",
-        "xyz": (0.486, 0.0, 0.51),          # temporary ibeo6-based placeholder
+        "xyz": (-0.611, 0.0, 0.344),
+        "rpy": (3.1416, 0.0, 3.1416),
+        "topic": "/sensors/ibeo1/points",
+        "frame_id": "ibeo1_frame",
+        # rear/center lidar
+    },
+
+    "ibeo2": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (-0.671, 0.839, 0.402),
+        "rpy": (0.021, 0.019, -2.125),
+        "topic": "/sensors/ibeo2/points",
+        "frame_id": "ibeo2_frame",
+        # rear left-ish lidar
+    },
+
+    "ibeo3": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (-0.472, 1.14, 0.484),
+        "rpy": (0.007, 0.079, 1.411),
+        "topic": "/sensors/ibeo3/points",
+        "frame_id": "ibeo3_frame",
+        # left side lidar
+    },
+
+    "ibeo4": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (-0.328, 1.132, 0.59),
+        "rpy": (0.0, 0.096, 0.5218),
+        "topic": "/sensors/ibeo4/points",
+        "frame_id": "ibeo4_frame",
+        # front left-ish lidar
+    },
+
+    "ibeo5": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (5.0, 0.0, 2.59),
+        "rpy": (3.133, 0.665, 0.005),
+        "topic": "/sensors/ibeo5/points",
+        "frame_id": "ibeo5_frame",
+        # high/front capsule lidar
+    },
+
+    "ibeo6": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (0.486, 0.0, 0.51),
         "rpy": (0.007, -0.05, 0.00735),
-        "topic": "/sensors/front_lidar/points",
-        "frame_id": "front_lidar_frame",
+        "topic": "/sensors/ibeo6/points",
+        "frame_id": "ibeo6_frame",
+        # front center lidar
     },
-    "rear_left_lidar": {
+
+    "ibeo7": {
         "type": "sensor.lidar.ray_cast",
-        "xyz": (-0.671, 0.839, 0.402),      # temporary ibeo2-based placeholder
-        "rpy": (0.021, 0.019, 2.125),
-        "topic": "/sensors/rear_left_lidar/points",
-        "frame_id": "rear_left_lidar_frame",
+        "xyz": (0.0, 0.0, 0.0),
+        "rpy": (0.0, 0.0, 0.0),
+        "topic": "/sensors/ibeo7/points",
+        "frame_id": "ibeo7_frame",
+        # weird
     },
-    "rear_right_lidar": {
+
+    "ibeo8": {
         "type": "sensor.lidar.ray_cast",
-        "xyz": (-0.671, -0.839, 0.402),     # temporary ibeo10-based placeholder
-        "rpy": (0.0, -0.007, -2.101),
-        "topic": "/sensors/rear_right_lidar/points",
-        "frame_id": "rear_right_lidar_frame",
+        "xyz": (-0.328, -1.132, 0.59),
+        "rpy": (0.035, 0.102, -0.529),
+        "topic": "/sensors/ibeo8/points",
+        "frame_id": "ibeo8_frame",
+        # front right-ish lidar
     },
+
+    "ibeo9": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (-0.472, -1.14, 0.484),
+        "rpy": (0.026, 0.1025, -1.445),
+        "topic": "/sensors/ibeo9/points",
+        "frame_id": "ibeo9_frame",
+        # right side lidar
+    },
+
+    "ibeo10": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (-0.671, -0.839, 0.402),
+        "rpy": (0.0, -0.007, 2.101),
+        "topic": "/sensors/ibeo10/points",
+        "frame_id": "ibeo10_frame",
+        # rear right-ish lidar
+    },
+
+
+    # IDEAL SENSORS
+    "seyond6": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (0.6, -0.20, 0.55),
+        "rpy": (0.0, 0.0, 0.0),
+        "topic": "/sensors/seyond6/points",
+        "frame_id": "seyond6_frame",
+    },
+
+
+    "dalsa2": { 
+        "type": "sensor.camera.rgb",
+        "xyz": (0.05, 0.02, 0.78),
+        "rpy": (0.0, 0.0, 0.0),
+        "topic": "/sensors/dalsa2_rgb/image_raw",
+        "frame_id": "dalsa2_rgb_frame",
+    },
+
+
+
+    # LASERS
+    "laser1": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (0.517, 0.369, 0.382),
+        "rpy": (1.571, 0.0, 0.0),
+        "topic": "/sensors/laser1/points",
+        "frame_id": "laser1_frame",
+    },
+    "laser2": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (3.079, 0.731, 0.234),
+        "rpy": (-1.571, 0.0, -1.571),
+        "topic": "/sensors/laser2/points",
+        "frame_id": "laser2_frame",
+    },
+    "laser3": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (3.079, -0.731, 0.234),
+        "rpy": (1.571, 0.0, 1.571),
+        "topic": "/sensors/laser3/points",
+        "frame_id": "laser3_frame",
+    },
+    "laser4": {
+        "type": "sensor.lidar.ray_cast",
+        "xyz": (0.517, -0.369, 0.382),
+        "rpy": (-1.571, 0.0, 0.0),
+        "topic": "/sensors/laser4/points",
+        "frame_id": "laser4_frame",
+    },
+    "imu": {
+        "type": "sensor.other.imu",
+        "xyz": (0.41, 0.0, 0.667),
+        "rpy": (0.0, 0.0, 3.1416),
+        "topic": "/sensors/imu/data",
+        "frame_id": "imu_frame",
+    },
+
+
 }
 
 
@@ -67,8 +312,8 @@ class CarlaInterfaceNode(Node):
     def __init__(self):
         super().__init__('carla_interface_node')
 
-        self.declare_parameter('draw_sensor_debug', True)
-
+        self.declare_parameter('draw_sensor_debug', SENSOR_DEBUG_FLAG)
+        self.declare_parameter('arch_spawn_flag', ARCH_SPAWN_FLAG)
 
         self.bridge = CvBridge()
 
@@ -84,6 +329,7 @@ class CarlaInterfaceNode(Node):
         self.sensor_queues = {}
         self.sensor_types = {}
         self.sensor_frame_ids = {}
+        self.laser_distance_publishers = {}
 
         self.status_pub = self.create_publisher(String, '/carla_interface/status', 10)
         self.pose_pub = self.create_publisher(PoseStamped, '/ego/pose', 10)
@@ -104,21 +350,26 @@ class CarlaInterfaceNode(Node):
         self.declare_parameter('host', 'localhost')
         self.declare_parameter('port', 2000)
         self.declare_parameter('timeout', 10.0)
-        self.declare_parameter('vehicle_blueprint', 'vehicle.modular.mod01')
+        self.declare_parameter('vehicle_blueprint', 'vehicle.fk.ushift')
 
-        self.declare_parameter('spawn_x', 285.45)
-        self.declare_parameter('spawn_y', -235.73)
-        self.declare_parameter('spawn_z', 1.0)
-        self.declare_parameter('spawn_yaw', 0.0)
+        self.declare_parameter('spawn_x', 280.45)
+        self.declare_parameter('spawn_y', -201.13)
+        # self.declare_parameter('spawn_z', 0.8)
+        self.declare_parameter('spawn_z', 0.3)
+        self.declare_parameter('spawn_yaw', 180.0)
 
         self.declare_parameter(
             'chosen_sensors',
             [
-                'front_left_rgb',
-                'front_right_rgb',
-                'front_lidar',
-                'rear_left_lidar',
-                'rear_right_lidar',
+                'seyond6',
+                'leopard4',
+                'leopard5',
+                'dalsa2',
+                'laser1',
+                'laser2',
+                'laser3',
+                'laser4',
+                'imu',
             ]
         )
 
@@ -142,7 +393,16 @@ class CarlaInterfaceNode(Node):
         self.ego_timer = self.create_timer(1.0 / ego_rate, self.publish_ego_state)
         self.sensor_timer = self.create_timer(1.0 / sensor_rate, self.publish_sensor_data)
 
-        self.publish_status('carla_interface_node fully initialized')
+        self.publish_status('carla_interface_node  init')
+
+        self.get_logger().info(f'Chosen sensor {list(self.get_parameter("chosen_sensors").value)}')
+
+        for sensor_name in self.sensor_publishers.keys():
+            spec = SENSOR_LAYOUT[sensor_name]
+            self.get_logger().info(
+                f'{sensor_name}: type={spec["type"]}, topic={spec["topic"]}, frame={spec["frame_id"]}'
+            )
+
 
     def publish_status(self, text: str):
         self.get_logger().info(text)
@@ -165,30 +425,50 @@ class CarlaInterfaceNode(Node):
         self.world = self.client.get_world()
         self.bp_lib = self.world.get_blueprint_library()
 
-        self.publish_status(f'Connected to CARLA at {host}:{port}')
+        self.publish_status(f'connected at {host}:{port}')
 
     def spawn_ego_vehicle(self):
         blueprint_id = self.get_parameter('vehicle_blueprint').value
         bp = self.bp_lib.find(blueprint_id)
 
-        spawn_tf = carla.Transform(
-            carla.Location(
-                x=float(self.get_parameter('spawn_x').value),
-                y=float(self.get_parameter('spawn_y').value),
-                z=float(self.get_parameter('spawn_z').value),
-            ),
-            carla.Rotation(
-                yaw=float(self.get_parameter('spawn_yaw').value)
+        if bool(self.get_parameter('arch_spawn_flag').value):
+            x,y, yaw = self.random_spawn_point(CARGOBOX_COORDINATES, MIN_RAD, MAX_RAD,MIN_ANG, MAX_ANG, MAX_YAW)
+            print ("coords:" , x, y , yaw)
+            spawn_tf = carla.Transform(
+                carla.Location(
+                    x=float(x),
+                    y=float(y),
+                    z=float(self.get_parameter('spawn_z').value),
+                ),
+                carla.Rotation(
+                    yaw=float(yaw)
+                )
             )
-        )
+        else:
+            spawn_tf = carla.Transform(
+                carla.Location(
+                    x=float(self.get_parameter('spawn_x').value),
+                    y=float(self.get_parameter('spawn_y').value),
+                    z=float(self.get_parameter('spawn_z').value),
+                ),
+                carla.Rotation(
+                    yaw=float(self.get_parameter('spawn_yaw').value)
+                )
+            )
 
         self.vehicle = self.world.try_spawn_actor(bp, spawn_tf)
+        time.sleep(2)
 
         if self.vehicle is None:
             raise RuntimeError('Failed to spawn ego vehicle')
 
         self.actors.append(self.vehicle)
         self.publish_status(f'Spawned ego vehicle id={self.vehicle.id} type={blueprint_id}')
+        self.get_logger().info(
+            f'vehicle transform: x={spawn_tf.location.x:.2f}, '
+            f'y={spawn_tf.location.y:.2f}, z={spawn_tf.location.z:.2f}, '
+            f'yaw={spawn_tf.rotation.yaw:.2f}'
+        )
 
     def setup_dynamic_sensor_interfaces(self):
         chosen_sensors = list(self.get_parameter('chosen_sensors').value)
@@ -211,68 +491,166 @@ class CarlaInterfaceNode(Node):
                 pub = self.create_publisher(Image, topic, qos_profile_sensor_data)
                 self.sensor_publishers[sensor_name] = pub
                 self.publish_status(f'Created camera publisher for {sensor_name} -> {topic}')
-
             elif sensor_type == 'sensor.lidar.ray_cast':
                 pub = self.create_publisher(PointCloud2, topic, qos_profile_sensor_data)
                 self.sensor_publishers[sensor_name] = pub
                 self.publish_status(f'Created lidar publisher for {sensor_name} -> {topic}')
 
+                if 'laser' in sensor_name.lower():
+                    dist_topic = f'/sensors/{sensor_name}/distance'
+                    dist_pub = self.create_publisher(Float32, dist_topic, qos_profile_sensor_data)
+                    self.laser_distance_publishers[sensor_name] = dist_pub
+                    self.publish_status(f'Created laser distance publisher for {sensor_name} -> {dist_topic}')
+          
+            elif sensor_type == 'sensor.other.imu':
+                pub = self.create_publisher(Imu, topic, qos_profile_sensor_data)
+                self.sensor_publishers[sensor_name] = pub
+                self.publish_status(f'Created IMU publisher for {sensor_name} -> {topic}')
             else:
                 self.get_logger().warn(
                     f'Unsupported sensor type {sensor_type} for sensor {sensor_name}'
                 )
 
-    def urdf_to_carla_transform(self, xyz, rpy):
+    def urdf_to_carla_transform(self, xyz, rpy, body_x_offset=COM_OFFSET):
         x_u, y_u, z_u = xyz
         roll_u, pitch_u, yaw_u = rpy
 
-        x_c = x_u
-        y_c = -y_u
-        z_c = z_u
+        x_c = -(x_u + body_x_offset) + URDF_OFFSET_X
+        y_c = y_u
+        z_c = z_u + URDF_OFFSET_Z
 
         roll_c = math.degrees(roll_u)
         pitch_c = math.degrees(pitch_u)
-        yaw_c = -math.degrees(yaw_u)
+        yaw_c = -math.degrees(yaw_u) + 180.0
 
         return carla.Transform(
             carla.Location(x=x_c, y=y_c, z=z_c),
             carla.Rotation(roll=roll_c, pitch=pitch_c, yaw=yaw_c),
         )
+    
 
-    def configure_sensor_blueprint(self, bp):
+    def random_spawn_point(self, center, min_radius, max_radius,
+                            start_angle=-15, end_angle= 15, max_yaw_deg = 15):
+        cx, cy = center
+
+        u = random.random()
+        r = math.sqrt(u * (max_radius**2 - min_radius**2) + min_radius**2)
+
+        theta = math.radians(random.uniform(start_angle, end_angle))+ math.pi
+
+        x = cx + r * math.cos(theta)
+        y = cy + r * math.sin(theta)
+
+        if y < cy:
+            yaw = random.uniform(0.0, max_yaw_deg)
+        else:
+            yaw = random.uniform(-max_yaw_deg, 0.0)
+        yaw += 180.0
+        yaw = (yaw + 180) % 360 - 180
+        if bool(self.get_parameter('draw_sensor_debug').value):
+            self.draw_spawn_box(center, min_radius, max_radius,
+                        start_angle, end_angle)
+        return x, y, yaw
+    
+    def draw_spawn_box(self, center, min_radius, max_radius,
+                   start_angle=-15, end_angle=15,
+                   z=0.5, life_time=50.0):
+
+        cx, cy = center
+
+        a0 = math.radians(start_angle) + math.pi
+        a1 = math.radians(end_angle) + math.pi
+
+        # 4 points (inner/outer × start/end)
+        points = [
+            (cx + min_radius * math.cos(a0), cy + min_radius * math.sin(a0)),
+            (cx + min_radius * math.cos(a1), cy + min_radius * math.sin(a1)),
+            (cx + max_radius * math.cos(a0), cy + max_radius * math.sin(a0)),
+            (cx + max_radius * math.cos(a1), cy + max_radius * math.sin(a1)),
+        ]
+
+        for (x, y) in points:
+            self.world.debug.draw_point(
+                carla.Location(x=float(x), y=float(y), z=float(z)),
+                size=0.12,
+                color=carla.Color(255, 0, 255),
+                life_time=life_time
+            )
+
+    def configure_sensor_blueprint(self, bp, sensor_name = None):
         if bp.id == 'sensor.camera.rgb':
-            bp.set_attribute('image_size_x', str(IM_WIDTH))
-            bp.set_attribute('image_size_y', str(IM_HEIGHT))
-            bp.set_attribute('fov', '90')
-            bp.set_attribute('sensor_tick', '0.05')
-
-        elif bp.id == 'sensor.lidar.hss_lidar':
-            bp.set_attribute('channels', '128')
-            bp.set_attribute('range', '40')
-            bp.set_attribute('rotation_frequency', '10')
-            bp.set_attribute('horizontal_fov', '120')
-            bp.set_attribute('horizontal_resolution', '0.1')
-            bp.set_attribute('upper_fov', '12.9')
-            bp.set_attribute('lower_fov', '-12.5')
-            bp.set_attribute('sensor_tick', '0.1')
-            bp.set_attribute('dropoff_general_rate', '0.0')
-            bp.set_attribute('dropoff_intensity_limit', '1.0')
-            bp.set_attribute('dropoff_zero_intensity', '0.0')
-            bp.set_attribute('noise_stddev', '0.0')
-
+            img_x = IM_WIDTH
+            img_y = IM_HEIGHT
+            fov = 90.0
+            sensor_tick = 0.05
+            if sensor_name is not None:
+                name= sensor_name.lower()
+                if 'leopard' in name:
+                    img_x = 2880
+                    img_y = 1860
+                    fov = 120.0
+                    sensor_tick = 0.05
+                elif 'dalsa' in name:
+                    img_x = 1936
+                    img_y = 1216
+                    fov = 23.6
+                    sensor_tick = 0.05
+                        
+            bp.set_attribute('image_size_x', str(img_x))
+            bp.set_attribute('image_size_y', str(img_y))
+            bp.set_attribute('fov', str(fov))
+            bp.set_attribute('sensor_tick', str(sensor_tick))
+            
         elif bp.id == 'sensor.lidar.ray_cast':
-            bp.set_attribute('channels', '128')
-            bp.set_attribute('range', '15')
-            bp.set_attribute('points_per_second', '600000')
-            bp.set_attribute('rotation_frequency', '20')
-            bp.set_attribute('horizontal_fov', '130')
-            bp.set_attribute('upper_fov', '10')
-            bp.set_attribute('lower_fov', '-30.0')
-            bp.set_attribute('sensor_tick', '0.05')
-            bp.set_attribute('dropoff_general_rate', '0.0')
-            bp.set_attribute('dropoff_intensity_limit', '1.0')
-            bp.set_attribute('dropoff_zero_intensity', '0.0')
-            bp.set_attribute('noise_stddev', '0.0')
+            if sensor_name is not None:
+                name= sensor_name.lower()
+                if 'laser' in name:
+                    bp.set_attribute('channels', '1')
+                    bp.set_attribute('points_per_second', '500')
+                    bp.set_attribute('horizontal_fov', '1')
+                    bp.set_attribute('upper_fov', '0')
+                    bp.set_attribute('lower_fov', '0')
+                    bp.set_attribute('range', '12')
+                    bp.set_attribute('rotation_frequency', '10')
+                    bp.set_attribute('sensor_tick', '0.1')
+                    bp.set_attribute('dropoff_general_rate', '0.0')
+                    bp.set_attribute('dropoff_intensity_limit', '1.0')
+                    bp.set_attribute('dropoff_zero_intensity', '0.0')
+                    bp.set_attribute('noise_stddev', '0.0')
+                else:
+            
+                    bp.set_attribute('channels', '150')
+                    bp.set_attribute('range', '250')              
+                    bp.set_attribute('points_per_second', '1000000')
+                    bp.set_attribute('rotation_frequency', '10')
+                    bp.set_attribute('horizontal_fov', '120')
+                    bp.set_attribute('upper_fov', '12.5')
+                    bp.set_attribute('lower_fov', '-12.5')
+                    bp.set_attribute('sensor_tick', '0.1')
+
+                    bp.set_attribute('dropoff_general_rate', '0.0')
+                    bp.set_attribute('dropoff_intensity_limit', '1.0')
+                    bp.set_attribute('dropoff_zero_intensity', '0.0')
+
+                    bp.set_attribute('noise_stddev', '0.01')
+                    bp.set_attribute('atmosphere_attenuation_rate', '0.002')
+
+
+        elif bp.id == 'sensor.other.imu':
+            bp.set_attribute('sensor_tick', '0.01') 
+            bp.set_attribute('noise_accel_stddev_x', '0.0055')
+            bp.set_attribute('noise_accel_stddev_y', '0.0055')
+            bp.set_attribute('noise_accel_stddev_z', '0.0055')
+
+            bp.set_attribute('noise_gyro_bias_x', '0.001745')
+            bp.set_attribute('noise_gyro_bias_y', '0.001745')
+            bp.set_attribute('noise_gyro_bias_z', '0.001745')
+
+            bp.set_attribute('noise_gyro_stddev_x', '0.00016')
+            bp.set_attribute('noise_gyro_stddev_y', '0.00016')
+            bp.set_attribute('noise_gyro_stddev_z', '0.00016')
+
+            bp.set_attribute('noise_seed', '1')
 
     def spawn_sensors(self):
         chosen_sensors = list(self.get_parameter('chosen_sensors').value)
@@ -283,7 +661,7 @@ class CarlaInterfaceNode(Node):
 
             spec = SENSOR_LAYOUT[sensor_name]
             bp = self.bp_lib.find(spec['type'])
-            self.configure_sensor_blueprint(bp)
+            self.configure_sensor_blueprint(bp, sensor_name)
 
             tf = self.urdf_to_carla_transform(spec['xyz'], spec['rpy'])
             actor = self.world.try_spawn_actor(bp, tf, attach_to=self.vehicle)
@@ -304,17 +682,74 @@ class CarlaInterfaceNode(Node):
                 actor.listen(
                     lambda lidar, name=sensor_name: self.sensor_callback(lidar, name)
                 )
+            elif sensor_type == 'sensor.other.imu':
+                actor.listen(lambda imu, name=sensor_name: self.sensor_callback(imu, name)
+                )
 
             self.publish_status(
                 f'Spawned sensor {sensor_name} type={sensor_type} '
                 f'xyz={spec["xyz"]} rpy={spec["rpy"]}'
             )
 
+    def carla_imu_to_ros_imu(self, imu_data, frame_id: str) -> Imu:
+        msg = Imu()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = frame_id
 
-    def draw_pose_arrow(self, tf, color, label="", life_time=0.2, length=1.5):
+        msg.linear_acceleration.x = float(imu_data.accelerometer.x)
+        msg.linear_acceleration.y = float(imu_data.accelerometer.y)
+        msg.linear_acceleration.z = float(imu_data.accelerometer.z)
+
+        msg.angular_velocity.x = float(imu_data.gyroscope.x)
+        msg.angular_velocity.y = float(imu_data.gyroscope.y)
+        msg.angular_velocity.z = float(imu_data.gyroscope.z)
+
+        tf = self.vehicle.get_transform()
+
+        roll = math.radians(tf.rotation.roll)
+        pitch = math.radians(tf.rotation.pitch)
         yaw = math.radians(tf.rotation.yaw)
 
-        start = tf.location + carla.Location(z=0.3)
+        qx, qy, qz, qw = self.euler_to_quaternion(roll, pitch, yaw)
+
+        msg.orientation.x = qx
+        msg.orientation.y = qy
+        msg.orientation.z = qz
+        msg.orientation.w = qw
+
+        msg.orientation_covariance[0] = 1e-3
+        msg.orientation_covariance[4] = 1e-3
+        msg.orientation_covariance[8] = 1e-3
+
+        msg.angular_velocity_covariance[0] = 1e-6
+        msg.angular_velocity_covariance[4] = 1e-6
+        msg.angular_velocity_covariance[8] = 1e-6
+
+        msg.linear_acceleration_covariance[0] = 1e-4
+        msg.linear_acceleration_covariance[4] = 1e-4
+        msg.linear_acceleration_covariance[8] = 1e-4
+
+        return msg
+    
+    def euler_to_quaternion(self, roll, pitch, yaw):
+        cy = math.cos(yaw * 0.5)
+        sy = math.sin(yaw * 0.5)
+        cp = math.cos(pitch * 0.5)
+        sp = math.sin(pitch * 0.5)
+        cr = math.cos(roll * 0.5)
+        sr = math.sin(roll * 0.5)
+
+        qw = cr * cp * cy + sr * sp * sy
+        qx = sr * cp * cy - cr * sp * sy
+        qy = cr * sp * cy + sr * cp * sy
+        qz = cr * cp * sy - sr * sp * cy
+
+        return qx, qy, qz, qw
+
+    def draw_pose_arrow(self, tf, color, label="", life_time=0.4, length=0.5):
+        yaw = math.radians(tf.rotation.yaw)
+
+        start = tf.location
 
         end = carla.Location(
             x=start.x + length * math.cos(yaw),
@@ -324,8 +759,8 @@ class CarlaInterfaceNode(Node):
 
         self.world.debug.draw_arrow(
             start, end,
-            thickness=0.08,
-            arrow_size=0.2,
+            thickness=0.04,
+            arrow_size=0.05,
             color=color,
             life_time=life_time
         )
@@ -340,6 +775,74 @@ class CarlaInterfaceNode(Node):
             )
 
 
+    def get_ego_center(self, offset=COM_OFFSET):
+        if self.vehicle is None:
+            return None
+
+        try:
+            tf = self.vehicle.get_transform()
+            loc = tf.location
+            yaw = math.radians(tf.rotation.yaw)
+
+            # Forward vector
+            fx = math.cos(yaw)
+            fy = math.sin(yaw)
+
+            cx = loc.x + offset * fx
+            cy = loc.y + offset * fy
+            cz = loc.z
+
+            return carla.Location(x=float(cx), y=float(cy), z=float(cz))
+
+        except Exception as e:
+            self.get_logger().warn(f"get_ego_center failed: {e}")
+            return None
+
+    def get_rear_position(self):
+        return self.get_ego_center(offset=-VEH_LENGTH / 2)
+    def get_front_position(self):
+        return self.get_ego_center(offset=+VEH_LENGTH / 2)
+        
+
+    def draw_boundary_box(self, tf, life_time=0.1, length=VEH_LENGTH, width=VEH_WIDTH, offset=COM_OFFSET):
+        loc = tf.location
+        yaw = np.radians(tf.rotation.yaw)
+
+        # Forward and right vectors
+        forward = np.array([np.cos(yaw), np.sin(yaw)])
+        right = np.array([-np.sin(yaw), np.cos(yaw)])
+
+ 
+        center = np.array([
+            loc.x + offset * forward[0],
+            loc.y + offset * forward[1]
+        ])
+
+        half_l = length / 2.0
+        half_w = width / 2.0
+
+        corners = [
+            center + forward * half_l - right * half_w,  # front-left
+            center + forward * half_l + right * half_w,  # front-right
+            center - forward * half_l + right * half_w,  # rear-right
+            center - forward * half_l - right * half_w,  # rear-left
+        ]
+
+        corners_carla = [
+            carla.Location(x=float(p[0]), y=float(p[1]), z=loc.z + 0.2)
+            for p in corners
+        ]
+
+        # Draw lines
+        for i in range(4):
+            self.world.debug.draw_line(
+                corners_carla[i],
+                corners_carla[(i + 1) % 4],
+                thickness=0.12,
+                color=carla.Color(0, 255, 0),
+                life_time=life_time
+            )
+
     def debug_draw_loop(self):
         if self.world is None:
             return
@@ -349,40 +852,37 @@ class CarlaInterfaceNode(Node):
                 tf = self.vehicle.get_transform()
                 self.draw_pose_arrow(
                     tf,
-                    color=carla.Color(0, 255, 0),
+                    color=carla.Color(255, 255, 255),
                     label="EGO",
-                    life_time=0.2,
-                    length=2.0
+                    life_time=0.5,
+                    length=1.0
                 )
+                self.draw_boundary_box(tf, life_time=0.5)
             except Exception:
                 pass
 
-        colors = {
-            "front_left_rgb": carla.Color(0, 255, 0),
-            "front_right_rgb": carla.Color(0, 200, 0),
-            "front_lidar": carla.Color(255, 255, 255),
-            "rear_left_lidar": carla.Color(0, 255, 255),
-            "rear_right_lidar": carla.Color(255, 0, 255),
-        }
 
         for name, actor in self.sensor_actors.items():
             try:
                 tf = actor.get_transform()
-                color = colors.get(name, carla.Color(255, 255, 0))
+                sensor_type = self.sensor_types.get(name, "")
+
+                if sensor_type == "sensor.camera.rgb":
+                    color = carla.Color(0, 255, 0)      # green for RGB cameras
+                elif "lidar" in sensor_type:
+                    color = carla.Color(255, 0, 0)      # red for lidars
+                else:
+                    color = carla.Color(255, 255, 0)    # yellow fallback
 
                 self.draw_pose_arrow(
                     tf,
                     color=color,
                     label=name,
-                    life_time=0.2,
-                    length=1.5
+                    life_time=0.5,
+                    length=0.5
                 )
             except Exception:
                 pass
-
-
-
-
 
     def sensor_callback(self, data, sensor_name: str):
         if sensor_name not in self.sensor_queues:
@@ -420,6 +920,16 @@ class CarlaInterfaceNode(Node):
                 msg = self.carla_lidar_to_pointcloud2(latest, frame_id)
                 publisher.publish(msg)
 
+                if sensor_name in self.laser_distance_publishers:
+                    dist = self.lidar_to_distance(latest)
+                    dist_msg = Float32()
+                    dist_msg.data = float(dist)
+                    self.laser_distance_publishers[sensor_name].publish(dist_msg)
+
+            elif sensor_type == 'sensor.other.imu':
+                msg = self.carla_imu_to_ros_imu(latest, frame_id)
+                publisher.publish(msg)
+
     def carla_image_to_ros_image(self, image: carla.Image, frame_id: str) -> Image:
         arr = np.frombuffer(image.raw_data, dtype=np.uint8)
         arr = arr.reshape((image.height, image.width, 4))
@@ -454,6 +964,15 @@ class CarlaInterfaceNode(Node):
         msg.row_step = msg.point_step * points.shape[0]
         msg.data = points.astype(np.float32).tobytes()
         return msg
+    
+    def lidar_to_distance(self, lidar_data):
+        points = np.frombuffer(lidar_data.raw_data, dtype=np.float32).reshape(-1, 4)
+
+        if len(points) == 0:
+            return 12.0  # range max for the lasers
+
+        distances = np.linalg.norm(points[:, :3], axis=1)
+        return float(np.min(distances))
 
     def publish_ego_state(self):
         if self.vehicle is None:
@@ -555,6 +1074,7 @@ class CarlaInterfaceNode(Node):
         self.sensor_queues.clear()
         self.sensor_types.clear()
         self.sensor_frame_ids.clear()
+        self.laser_distance_publishers.clear()
         self.vehicle = None
 
         try:

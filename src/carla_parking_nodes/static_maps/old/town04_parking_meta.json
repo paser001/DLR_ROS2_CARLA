@@ -1,0 +1,12 @@
+{
+  "host": "localhost",
+  "port": 2000,
+  "x_min": 265.0,
+  "x_max": 305.0,
+  "y_min": -245.0,
+  "y_max": -180.0,
+  "resolution": 0.2,
+  "width": 200,
+  "height": 325,
+  "waypoint_spacing": 0.5
+}

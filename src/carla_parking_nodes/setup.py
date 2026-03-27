@@ -28,6 +28,8 @@ setup(
        	 	'parking_map_node = carla_parking_nodes.parking_map_node:main',
             'sensor_viewer_node = carla_parking_nodes.sensor_viewer_node:main',
             'keyboard_control_node = carla_parking_nodes.keyboard_control_node:main',
+            'parking_controller_node = carla_parking_nodes.parking_controller_node:main',
+            'joystick_control_node = carla_parking_nodes.joystick_control_node:main',
         ],
     },
 )

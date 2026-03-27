@@ -1,5 +1,0 @@
-[console_scripts]
-carla_interface_node = carla_parking_nodes.carla_interface_node:main
-keyboard_control_node = carla_parking_nodes.keyboard_control_node:main
-parking_map_node = carla_parking_nodes.parking_map_node:main
-sensor_viewer_node = carla_parking_nodes.sensor_viewer_node:main

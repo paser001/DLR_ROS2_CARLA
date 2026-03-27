@@ -1,6 +1,0 @@
-{
-  "package_name": "carla_parking_msgs",
-  "non_idl_tuples": [
-    "/home/student/carla_ros2_ws/src/carla_parking_msgs:msg/VehicleControl.msg"
-  ]
-}
