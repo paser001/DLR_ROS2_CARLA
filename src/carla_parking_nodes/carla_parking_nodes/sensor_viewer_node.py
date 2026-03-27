@@ -13,6 +13,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, PointCloud2
 from cv_bridge import CvBridge
 from sensor_msgs_py import point_cloud2
+from std_msgs.msg import Float32
 
 
 LIDAR_IMG_SIZE = 700
@@ -45,6 +46,24 @@ class SensorViewerNode(Node):
         self.latest_images: Dict[str, np.ndarray] = {}
         self.latest_lidar_bev: Dict[str, np.ndarray] = {}
         self.latest_lidar_points_vehicle: Dict[str, np.ndarray] = {}
+
+        self.latest_lasers: Dict[str, float] = {}
+
+        self.laser_topics = {
+            'laser1': '/sensors/laser1/distance',
+            'laser2': '/sensors/laser2/distance',
+            'laser3': '/sensors/laser3/distance',
+            'laser4': '/sensors/laser4/distance',
+        }
+
+        self.laser_layout = {
+            'laser1': {"xyz": (0.517, 0.369, 0.382), "rpy": (1.571, 0.0, 0.0)},
+            'laser2': {"xyz": (3.079, 0.731, 0.234), "rpy": (-1.571, 0.0, -1.571)},
+            'laser3': {"xyz": (3.079, -0.731, 0.234), "rpy": (1.571, 0.0, 1.571)},
+            'laser4': {"xyz": (0.517, -0.369, 0.382), "rpy": (-1.571, 0.0, 0.0)},
+        }
+
+        self.laser_subs = []
 
         self.camera_topics = {
             'dalsa2': '/sensors/dalsa2_rgb/image_raw',
@@ -85,13 +104,22 @@ class SensorViewerNode(Node):
             self.lidar_subs.append(sub)
             self.get_logger().info(f'Subscribed to lidar topic: {topic}')
 
+        for name, topic in self.laser_topics.items():
+            sub = self.create_subscription(
+                Float32,
+                topic,
+                lambda msg, sensor_name=name: self.laser_callback(msg, sensor_name),
+                10
+            )
+            self.laser_subs.append(sub)
+            self.get_logger().info(f'Subscribed to laser topic: {topic}')
+
         for name in self.camera_topics.keys():
             cv2.namedWindow(name, cv2.WINDOW_NORMAL)
 
         for name in self.lidar_topics.keys():
             cv2.namedWindow(f'{name}_lidar', cv2.WINDOW_AUTOSIZE)
 
-        cv2.namedWindow('surround_lidar_fused', cv2.WINDOW_AUTOSIZE)
 
         self.display_timer = self.create_timer(0.03, self.display_loop)
 
@@ -144,6 +172,10 @@ class SensorViewerNode(Node):
         except Exception as e:
             self.get_logger().warn(f'Lidar callback failed for {sensor_name}: {e}')
 
+    def laser_callback(self, msg: Float32, sensor_name: str):
+        self.latest_lasers[sensor_name] = float(msg.data)
+        print(sensor_name, self.latest_lasers[sensor_name])
+
 
     def count_points_in_box_from_pts(self, pts: np.ndarray, x_min, x_max, y_min, y_max) -> int:
         if pts is None or len(pts) == 0:
@@ -185,14 +217,89 @@ class SensorViewerNode(Node):
                 count = self.count_points_in_box_from_pts(pts, x_min, x_max, y_min, y_max)
                 label = f'{name}:{count}'
                 # print(label)
+    def draw_laser_panel(self, img: np.ndarray):
+        y0 = 25
+        names = ['laser1', 'laser2', 'laser3', 'laser4']
 
+        for i, name in enumerate(names):
+            d = self.latest_lasers.get(name, None)
+
+            if d is None:
+                txt = f'{name}: --'
+                color = (150, 150, 150)
+            else:
+                txt = f'{name}: {d:.2f} m'
+                if d < 2.0:
+                    color = (0, 0, 255)
+                elif d < 5.0:
+                    color = (0, 255, 255)
+                else:
+                    color = (0, 255, 0)
+
+            cv2.putText(
+                img,
+                txt,
+                (15, y0 + i * 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2,
+                cv2.LINE_AA
+            )
             
+    def draw_lasers_on_bev(self, img: np.ndarray):
+        img_size = img.shape[0]
+        scale = img_size / (2.0 * LIDAR_RANGE_M)
+        center = img_size // 2
+
+        def to_px(x, y):
+            px = int(center + y * scale)
+            py = int(center - x * scale)
+            return px, py
+
+        for name, spec in self.laser_layout.items():
+            xyz = spec["xyz"]
+            rpy = spec["rpy"]
+
+            (tx, ty, _), (_, _, yaw) = self.urdf_pose_to_vehicle_frame(xyz, rpy)
+            distance = self.latest_lasers.get(name, None)
+
+            if distance is None:
+                color = (100, 100, 100)
+                label = f"{name}: --"
+                ray_len = 1.0
+            else:
+                if distance < 2.0:
+                    color = (0, 0, 255)
+                elif distance < 5.0:
+                    color = (0, 255, 255)
+                else:
+                    color = (0, 255, 0)
+
+                label = f"{name}: {distance:.2f}m"
+                ray_len = min(distance, 12.0)
+
+            x0, y0 = tx, ty
+            x1 = x0 + ray_len * np.cos(yaw)
+            y1 = y0 + ray_len * np.sin(yaw)
+
+            p0 = to_px(x0, y0)
+            p1 = to_px(x1, y1)
+
+            cv2.circle(img, p0, 4, color, -1)
+            cv2.line(img, p0, p1, color, 2)
+            cv2.putText(
+                img,
+                label,
+                (p0[0] + 6, p0[1] - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                1,
+                cv2.LINE_AA
+            )
 
     def urdf_pose_to_vehicle_frame(self, xyz, rpy):
-        """
-        Convert URDF sensor pose to vehicle frame convention:
-        x forward, y right, z up
-        """
         x_u, y_u, z_u = xyz
         roll_u, pitch_u, yaw_u = rpy
 
@@ -285,6 +392,7 @@ class SensorViewerNode(Node):
         # self.draw_ego_marker(bev)
         # self.draw_candidate_vehicle_boxes(bev)
         # self.draw_parking_safety_boxes(bev)
+        # self.draw_lasers_on_bev(bev)
 
         return bev
 
@@ -443,10 +551,10 @@ class SensorViewerNode(Node):
             # cv2.imshow(name, img)
 
         for name, bev in self.latest_lidar_bev.items():
+            # display_bev = bev.copy()
+            # self.draw_laser_panel(display_bev)
             cv2.imshow(f'{name}_lidar', bev)
 
-        fused = self.fused_lidar_history_to_bev()
-        cv2.imshow('surround_lidar_fused', fused)
 
         key = cv2.waitKey(1)
         if key == 27:

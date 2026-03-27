@@ -22,9 +22,13 @@ from carla_parking_msgs.msg import VehicleControl
 
 SENSOR_DEBUG_FLAG = False
 
+#VEHICLE CONSTANTS
+MAX_THROTTLE = 0.45
+
 # CAMERA PARAMS
 IM_WIDTH = 1936
 IM_HEIGHT = 1216
+DALSA_LENS_FOV = 31 # FOVh​=2⋅arctan(sensor width/2⋅focal length​) 12mm is ≈31.2° // 16mm is ≈23.6°
 
 #CARLA LOCATION TO GEOMETRICAL MIDDLE
 VEH_WIDTH = 4 * 0.623
@@ -40,7 +44,7 @@ URDF_OFFSET_Z = 0.4
 ARCH_SPAWN_FLAG = False
 CARGOBOX_COORDINATES = (290.9, -201.03)
 MIN_RAD= 7
-MAX_RAD= 17
+MAX_RAD= 15
 MIN_ANG= -30
 MAX_ANG= 30
 MAX_YAW = 15
@@ -53,7 +57,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 3.142),
         "topic": "/sensors/leopard1_rgb/image_raw",
         "frame_id": "leopard1_rgb_frame",
-        # rear center camera
     },
 
     "leopard2": {
@@ -62,7 +65,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 0.0),
         "topic": "/sensors/leopard2_rgb/image_raw",
         "frame_id": "leopard2_rgb_frame",
-        # right side camera
     },
 
     "leopard3": {
@@ -71,7 +73,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 0.0),
         "topic": "/sensors/leopard3_rgb/image_raw",
         "frame_id": "leopard3_rgb_frame",
-        # left side camera
     },
 
     "leopard4": {
@@ -80,7 +81,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 0.0),
         "topic": "/sensors/leopard4_rgb/image_raw",
         "frame_id": "leopard4_rgb_frame",
-        # front right camera
     },
 
     "leopard5": {
@@ -89,7 +89,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 0.0),
         "topic": "/sensors/leopard5_rgb/image_raw",
         "frame_id": "leopard5_rgb_frame",
-        # front left camera
     },
 
     "leopard6": {
@@ -98,7 +97,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 0.0),
         "topic": "/sensors/leopard6_rgb/image_raw",
         "frame_id": "leopard6_rgb_frame",
-        # front left corner camera
     },
 
     "leopard7": {
@@ -107,7 +105,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 0.0),
         "topic": "/sensors/leopard7_rgb/image_raw",
         "frame_id": "leopard7_rgb_frame",
-        # front right corner camera
     },
 
     "leopard8": {
@@ -116,7 +113,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, -2.133),
         "topic": "/sensors/leopard8_rgb/image_raw",
         "frame_id": "leopard8_rgb_frame",
-        # rear right camera
     },
 
     "leopard9": {
@@ -125,7 +121,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 2.133),
         "topic": "/sensors/leopard9_rgb/image_raw",
         "frame_id": "leopard9_rgb_frame",
-        # rear left camera
     },
 
     "dalsa1": {
@@ -134,7 +129,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, -1.571),
         "topic": "/sensors/dalsa1_rgb/image_raw",
         "frame_id": "dalsa1_rgb_frame",
-        # rear right wide camera
     },
 
     "dalsa3": {
@@ -143,7 +137,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 1.571),
         "topic": "/sensors/dalsa3_rgb/image_raw",
         "frame_id": "dalsa3_rgb_frame",
-        # rear left wide camera
     },
 
     "dalsa4": {
@@ -152,7 +145,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.0, 3.142),
         "topic": "/sensors/dalsa4_rgb/image_raw",
         "frame_id": "dalsa4_rgb_frame",
-        # rear center camera
     },
 
     # LIDAR
@@ -162,7 +154,6 @@ SENSOR_LAYOUT = {
         "rpy": (3.1416, 0.0, 3.1416),
         "topic": "/sensors/ibeo1/points",
         "frame_id": "ibeo1_frame",
-        # rear/center lidar
     },
 
     "ibeo2": {
@@ -171,7 +162,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.021, 0.019, -2.125),
         "topic": "/sensors/ibeo2/points",
         "frame_id": "ibeo2_frame",
-        # rear left-ish lidar
     },
 
     "ibeo3": {
@@ -180,7 +170,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.007, 0.079, 1.411),
         "topic": "/sensors/ibeo3/points",
         "frame_id": "ibeo3_frame",
-        # left side lidar
     },
 
     "ibeo4": {
@@ -189,7 +178,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, 0.096, 0.5218),
         "topic": "/sensors/ibeo4/points",
         "frame_id": "ibeo4_frame",
-        # front left-ish lidar
     },
 
     "ibeo5": {
@@ -198,7 +186,6 @@ SENSOR_LAYOUT = {
         "rpy": (3.133, 0.665, 0.005),
         "topic": "/sensors/ibeo5/points",
         "frame_id": "ibeo5_frame",
-        # high/front capsule lidar
     },
 
     "ibeo6": {
@@ -207,7 +194,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.007, -0.05, 0.00735),
         "topic": "/sensors/ibeo6/points",
         "frame_id": "ibeo6_frame",
-        # front center lidar
     },
 
     "ibeo7": {
@@ -225,7 +211,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.035, 0.102, -0.529),
         "topic": "/sensors/ibeo8/points",
         "frame_id": "ibeo8_frame",
-        # front right-ish lidar
     },
 
     "ibeo9": {
@@ -234,7 +219,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.026, 0.1025, -1.445),
         "topic": "/sensors/ibeo9/points",
         "frame_id": "ibeo9_frame",
-        # right side lidar
     },
 
     "ibeo10": {
@@ -243,7 +227,6 @@ SENSOR_LAYOUT = {
         "rpy": (0.0, -0.007, 2.101),
         "topic": "/sensors/ibeo10/points",
         "frame_id": "ibeo10_frame",
-        # rear right-ish lidar
     },
 
 
@@ -353,7 +336,7 @@ class CarlaInterfaceNode(Node):
         self.declare_parameter('vehicle_blueprint', 'vehicle.fk.ushift')
 
         self.declare_parameter('spawn_x', 280.45)
-        self.declare_parameter('spawn_y', -201.13)
+        self.declare_parameter('spawn_y', -201.2)
         # self.declare_parameter('spawn_z', 0.8)
         self.declare_parameter('spawn_z', 0.3)
         self.declare_parameter('spawn_yaw', 180.0)
@@ -433,7 +416,6 @@ class CarlaInterfaceNode(Node):
 
         if bool(self.get_parameter('arch_spawn_flag').value):
             x,y, yaw = self.random_spawn_point(CARGOBOX_COORDINATES, MIN_RAD, MAX_RAD,MIN_ANG, MAX_ANG, MAX_YAW)
-            print ("coords:" , x, y , yaw)
             spawn_tf = carla.Transform(
                 carla.Location(
                     x=float(x),
@@ -561,7 +543,6 @@ class CarlaInterfaceNode(Node):
         a0 = math.radians(start_angle) + math.pi
         a1 = math.radians(end_angle) + math.pi
 
-        # 4 points (inner/outer × start/end)
         points = [
             (cx + min_radius * math.cos(a0), cy + min_radius * math.sin(a0)),
             (cx + min_radius * math.cos(a1), cy + min_radius * math.sin(a1)),
@@ -593,7 +574,7 @@ class CarlaInterfaceNode(Node):
                 elif 'dalsa' in name:
                     img_x = 1936
                     img_y = 1216
-                    fov = 23.6
+                    fov = DALSA_LENS_FOV
                     sensor_tick = 0.05
                         
             bp.set_attribute('image_size_x', str(img_x))
@@ -604,7 +585,7 @@ class CarlaInterfaceNode(Node):
         elif bp.id == 'sensor.lidar.ray_cast':
             if sensor_name is not None:
                 name= sensor_name.lower()
-                if 'laser' in name:
+                if 'laser' in name: #0.2 and 23 0.5  // 1115
                     bp.set_attribute('channels', '1')
                     bp.set_attribute('points_per_second', '500')
                     bp.set_attribute('horizontal_fov', '1')
@@ -617,6 +598,13 @@ class CarlaInterfaceNode(Node):
                     bp.set_attribute('dropoff_intensity_limit', '1.0')
                     bp.set_attribute('dropoff_zero_intensity', '0.0')
                     bp.set_attribute('noise_stddev', '0.0')
+                    if name in ['laser1', 'laser4']:
+                        bp.set_attribute('sensor_tick', '0.2')
+                    elif name in ['laser2', 'laser3']:
+                        bp.set_attribute('sensor_tick', '0.5')
+                    else:
+                        bp.set_attribute('sensor_tick', '0.5')
+
                 else:
             
                     bp.set_attribute('channels', '150')
@@ -774,7 +762,6 @@ class CarlaInterfaceNode(Node):
                 life_time=life_time
             )
 
-
     def get_ego_center(self, offset=COM_OFFSET):
         if self.vehicle is None:
             return None
@@ -784,7 +771,7 @@ class CarlaInterfaceNode(Node):
             loc = tf.location
             yaw = math.radians(tf.rotation.yaw)
 
-            # Forward vector
+            # Fwd vector
             fx = math.cos(yaw)
             fy = math.sin(yaw)
 
@@ -803,7 +790,6 @@ class CarlaInterfaceNode(Node):
     def get_front_position(self):
         return self.get_ego_center(offset=+VEH_LENGTH / 2)
         
-
     def draw_boundary_box(self, tf, life_time=0.1, length=VEH_LENGTH, width=VEH_WIDTH, offset=COM_OFFSET):
         loc = tf.location
         yaw = np.radians(tf.rotation.yaw)
@@ -1029,7 +1015,7 @@ class CarlaInterfaceNode(Node):
             return
 
         ctrl = carla.VehicleControl()
-        ctrl.throttle = float(msg.throttle)
+        ctrl.throttle = min(float(msg.throttle), MAX_THROTTLE)
         ctrl.steer = float(msg.steer)
         ctrl.brake = float(msg.brake)
         ctrl.hand_brake = bool(msg.hand_brake)
@@ -1051,14 +1037,12 @@ class CarlaInterfaceNode(Node):
         except Exception:
             pass
 
-        # Stop sensors first
         for actor in reversed(self.actors):
             try:
                 actor.stop()
             except Exception:
                 pass
 
-        # Then destroy everything
         for actor in reversed(self.actors):
             try:
                 actor.destroy()

@@ -23,7 +23,7 @@ class XboxControlNode(Node):
         # -----------------------------
         self.declare_parameter('publish_rate', 30.0)
         self.declare_parameter('deadzone', 0.08)
-        self.declare_parameter('max_steer', 0.9)
+        self.declare_parameter('max_steer', 0.99)
         self.declare_parameter('steer_smoothing', 0.25)
         self.declare_parameter('steer_return_rate', 0.18)
         self.declare_parameter('throttle_gain', 1.0)
