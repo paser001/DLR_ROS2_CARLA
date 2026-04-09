@@ -11,11 +11,12 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 
-from std_msgs.msg import Float32
+from std_msgs.msg import String, Float32, Header, UInt32
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Image, PointCloud2, Imu
 from cv_bridge import CvBridge
 from sensor_msgs_py import point_cloud2
+from rclpy.qos import qos_profile_sensor_data
 
 from carla_parking_msgs.msg import VehicleControl
 
@@ -24,9 +25,7 @@ class DataLoggerNode(Node):
     def __init__(self):
         super().__init__('data_logger_node')
 
-        # -----------------------------
-        # Parameters
-        # -----------------------------
+
         self.declare_parameter('dataset_root', str(Path.home() / 'carla_datasets'))
         self.declare_parameter('run_name', '')
         self.declare_parameter('image_format', 'png')
@@ -109,21 +108,19 @@ class DataLoggerNode(Node):
         self._init_csv()
         self._write_metadata()
 
-        # -----------------------------
-        # Subscribers
-        # -----------------------------
-        self.create_subscription(Image, '/sensors/dalsa2_rgb/image_raw', self.dalsa2_cb, 10)
-        self.create_subscription(Image, '/sensors/leopard4_rgb/image_raw', self.leopard4_cb, 10)
-        self.create_subscription(Image, '/sensors/leopard5_rgb/image_raw', self.leopard5_cb, 10)
 
-        self.create_subscription(PointCloud2, '/sensors/seyond6/points', self.seyond6_cb, 10)
+        self.create_subscription(Image, '/sensors/dalsa2_rgb/image_raw', self.dalsa2_cb, qos_profile_sensor_data)
+        self.create_subscription(Image, '/sensors/leopard4_rgb/image_raw', self.leopard4_cb, qos_profile_sensor_data)
+        self.create_subscription(Image, '/sensors/leopard5_rgb/image_raw', self.leopard5_cb, qos_profile_sensor_data)
 
-        self.create_subscription(Float32, '/sensors/laser1/distance', self.laser1_cb, 10)
-        self.create_subscription(Float32, '/sensors/laser2/distance', self.laser2_cb, 10)
-        self.create_subscription(Float32, '/sensors/laser3/distance', self.laser3_cb, 10)
-        self.create_subscription(Float32, '/sensors/laser4/distance', self.laser4_cb, 10)
+        self.create_subscription(PointCloud2, '/sensors/seyond6/points', self.seyond6_cb, qos_profile_sensor_data)
 
-        self.create_subscription(Imu, '/sensors/imu/data', self.imu_cb, 10)
+        self.create_subscription(Float32, '/sensors/laser1/distance', self.laser1_cb, qos_profile_sensor_data)
+        self.create_subscription(Float32, '/sensors/laser2/distance', self.laser2_cb, qos_profile_sensor_data)
+        self.create_subscription(Float32, '/sensors/laser3/distance', self.laser3_cb, qos_profile_sensor_data)
+        self.create_subscription(Float32, '/sensors/laser4/distance', self.laser4_cb, qos_profile_sensor_data)
+
+        self.create_subscription(Imu, '/sensors/imu/data', self.imu_cb, qos_profile_sensor_data)
 
         self.create_subscription(VehicleControl, '/vehicle/control_cmd', self.control_cmd_cb, 10)
         self.create_subscription(VehicleControl, '/vehicle/control_applied', self.control_applied_cb, 10)
@@ -131,10 +128,10 @@ class DataLoggerNode(Node):
         self.create_subscription(Float32, '/ego/speed', self.speed_cb, 10)
         self.create_subscription(Float32, '/ego/yaw', self.yaw_cb, 10)
         self.create_subscription(PoseStamped, '/ego/pose', self.pose_cb, 10)
+        self.create_subscription(UInt32, '/episode/reset', self.episode_reset_cb, 10)
+        
 
-        # -----------------------------
-        # Timer
-        # -----------------------------
+ 
         period = 1.0 / self.log_rate_hz
         self.timer = self.create_timer(period, self.log_sample)
 
@@ -335,6 +332,10 @@ class DataLoggerNode(Node):
         self.latest_ori_y = float(msg.pose.orientation.y)
         self.latest_ori_z = float(msg.pose.orientation.z)
         self.latest_ori_w = float(msg.pose.orientation.w)
+    
+    def episode_reset_cb(self, msg: UInt32):
+        self.episode_id = int(msg.data)
+        self.get_logger().info(f'Received new episode_id={self.episode_id}')
 
     # =========================================================
     # Saving helpers
@@ -356,9 +357,7 @@ class DataLoggerNode(Node):
             writer = csv.writer(f)
             writer.writerow(row)
 
-    # =========================================================
-    # Main logging loop
-    # =========================================================
+
     def log_sample(self):
         # Minimal requirement
         if self.latest_dalsa2 is None:

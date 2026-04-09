@@ -12,7 +12,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
-from std_msgs.msg import String, Float32, Header
+from std_msgs.msg import String, Float32, Header, UInt32
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Image, PointCloud2, PointField, Imu
 from cv_bridge import CvBridge
@@ -41,7 +41,7 @@ URDF_OFFSET_Z = 0.4
 
 
 # ARCH SPAWN PARAMETERS
-ARCH_SPAWN_FLAG = False
+ARCH_SPAWN_FLAG = True
 CARGOBOX_COORDINATES = (290.9, -201.03)
 MIN_RAD= 7
 MAX_RAD= 15
@@ -318,6 +318,8 @@ class CarlaInterfaceNode(Node):
         self.pose_pub = self.create_publisher(PoseStamped, '/ego/pose', 10)
         self.speed_pub = self.create_publisher(Float32, '/ego/speed', 10)
         self.yaw_pub = self.create_publisher(Float32, '/ego/yaw', 10)
+        self.episode_reset_pub = self.create_publisher(UInt32, '/episode/reset', 10)
+        self.episode_id = 0
 
         
         self.control_applied_pub = self.create_publisher(
@@ -1065,6 +1067,106 @@ class CarlaInterfaceNode(Node):
             self.get_logger().info('All actors destroyed')
         except Exception:
             pass
+
+    def check_goal_and_reset(self):
+        if self.vehicle is None:
+            return
+
+        tf = self.vehicle.get_transform()
+
+
+        goal_x = CARGOBOX_COORDINATES[0]
+        goal_y = CARGOBOX_COORDINATES[1]
+        goal_yaw = 180.0
+
+        pos_tol = 1.5
+        yaw_tol = 5.0
+        speed_tol = 0.3
+
+        vel = self.vehicle.get_velocity()
+        speed = math.sqrt(vel.x ** 2 + vel.y ** 2 + vel.z ** 2)
+
+        dx = tf.location.x - goal_x
+        dy = tf.location.y - goal_y
+        pos_err = math.sqrt(dx * dx + dy * dy)
+
+        yaw_err = abs((tf.rotation.yaw - goal_yaw + 180.0) % 360.0 - 180.0)
+
+        reached = (
+            pos_err < pos_tol and
+            yaw_err < yaw_tol and
+            speed < speed_tol
+        )
+
+        if reached and not self.goal_reached:
+            self.goal_reached = True
+            self.reset_episode()
+
+        elif not reached:
+            self.goal_reached = False
+            
+    def reset_episode(self):
+        if self.vehicle is None:
+            return
+
+        try:
+            self.vehicle.apply_control(carla.VehicleControl(
+                throttle=0.0,
+                steer=0.0,
+                brake=1.0,
+                hand_brake=True
+            ))
+
+            time.sleep(1.5)
+
+            self.vehicle.set_simulate_physics(False)
+
+            x, y, yaw = self.random_spawn_point(
+                CARGOBOX_COORDINATES,
+                MIN_RAD,
+                MAX_RAD,
+                MIN_ANG,
+                MAX_ANG,
+                MAX_YAW
+            )
+
+            new_tf = carla.Transform(
+                carla.Location(
+                    x=float(x),
+                    y=float(y),
+                    z=float(self.get_parameter('spawn_z').value),
+                ),
+                carla.Rotation(yaw=float(yaw))
+            )
+
+            self.vehicle.set_transform(new_tf)
+
+            self.vehicle.set_target_velocity(carla.Vector3D(0.0, 0.0, 0.0))
+            self.vehicle.set_target_angular_velocity(carla.Vector3D(0.0, 0.0, 0.0))
+
+            time.sleep(1.5)
+            self.vehicle.set_simulate_physics(True)
+
+            self.vehicle.apply_control(carla.VehicleControl(
+                throttle=0.0,
+                steer=0.0,
+                brake=0.0,
+                hand_brake=False
+            ))
+
+            self.episode_id += 1
+
+            msg = UInt32()
+            msg.data = self.episode_id
+            self.episode_reset_pub.publish(msg)
+
+            self.publish_status(
+                f'Episode reset -> episode_id={self.episode_id}, '
+                f'x={x:.2f}, y={y:.2f}, yaw={yaw:.2f}'
+            )
+
+        except Exception as e:
+            self.get_logger().error(f'reset_episode failed: {e}')
 
 def main(args=None):
     rclpy.init(args=args)

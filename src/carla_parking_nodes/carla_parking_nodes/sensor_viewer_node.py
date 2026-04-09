@@ -109,7 +109,7 @@ class SensorViewerNode(Node):
                 Float32,
                 topic,
                 lambda msg, sensor_name=name: self.laser_callback(msg, sensor_name),
-                10
+                qos_profile_sensor_data
             )
             self.laser_subs.append(sub)
             self.get_logger().info(f'Subscribed to laser topic: {topic}')
