@@ -12,7 +12,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
-from std_msgs.msg import String, Float32, Header, UInt32
+from std_msgs.msg import String, Float32, Header, UInt32, Empty
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Image, PointCloud2, PointField, Imu
 from cv_bridge import CvBridge
@@ -319,6 +319,7 @@ class CarlaInterfaceNode(Node):
         self.speed_pub = self.create_publisher(Float32, '/ego/speed', 10)
         self.yaw_pub = self.create_publisher(Float32, '/ego/yaw', 10)
         self.episode_reset_pub = self.create_publisher(UInt32, '/episode/reset', 10)
+        
         self.episode_id = 0
 
         
@@ -329,6 +330,12 @@ class CarlaInterfaceNode(Node):
             VehicleControl,
             '/vehicle/control_cmd',
             self.control_cmd_callback,
+            10
+        )
+        self.reset_request_sub = self.create_subscription(
+            Empty,
+            '/episode/reset_request',
+            self.reset_request_callback,
             10
         )
 
@@ -512,6 +519,10 @@ class CarlaInterfaceNode(Node):
             carla.Rotation(roll=roll_c, pitch=pitch_c, yaw=yaw_c),
         )
     
+    def reset_request_callback(self, msg):
+        self.get_logger().info('Received reset request')
+        self.reset_episode()
+
 
     def random_spawn_point(self, center, min_radius, max_radius,
                             start_angle=-15, end_angle= 15, max_yaw_deg = 15):

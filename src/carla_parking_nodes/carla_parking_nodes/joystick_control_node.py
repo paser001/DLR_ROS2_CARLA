@@ -6,7 +6,7 @@ import rclpy
 from rclpy.node import Node
 
 from carla_parking_msgs.msg import VehicleControl
-
+from std_msgs.msg import Empty
 
 class XboxControlNode(Node):
     def __init__(self):
@@ -17,6 +17,7 @@ class XboxControlNode(Node):
             '/vehicle/control_cmd',
             10
         )
+        self.reset_pub = self.create_publisher(Empty, '/episode/reset_request', 10)
 
         # -----------------------------
         # Parameters
@@ -81,6 +82,11 @@ class XboxControlNode(Node):
     @staticmethod
     def clamp(value, low, high):
         return max(low, min(high, value))
+    
+    def publish_reset_request(self):
+        msg = Empty()
+        self.reset_pub.publish(msg)
+        self.get_logger().info('Published reset request')
 
     def apply_deadzone(self, value):
         if abs(value) < self.deadzone:
@@ -194,6 +200,7 @@ class XboxControlNode(Node):
             self.hand_brake = False
             self.manual_gear_shift = False
             self.gear = 0
+            self.publish_reset_request()
 
     def publish_control(self):
         msg = VehicleControl()
