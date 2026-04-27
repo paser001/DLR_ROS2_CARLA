@@ -11,7 +11,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 
-from std_msgs.msg import String, Float32, Header, UInt32
+from std_msgs.msg import Float32, UInt32
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Image, PointCloud2, Imu
 from cv_bridge import CvBridge
@@ -20,13 +20,18 @@ from rclpy.qos import qos_profile_sensor_data
 
 from carla_parking_msgs.msg import VehicleControl
 
+DATA_PATH = '/data/carla_datasets'
+IMG_RESIZE = (224, 224)
+
+# Goal pose in world frame: (x, y, yaw_degrees)
+CARGOBOX_COORDINATES = (290.9, -201.03, 180.0)
+
 
 class DataLoggerNode(Node):
     def __init__(self):
         super().__init__('data_logger_node')
 
-
-        self.declare_parameter('dataset_root', str(Path.home() / 'carla_datasets'))
+        self.declare_parameter('dataset_root', DATA_PATH)
         self.declare_parameter('run_name', '')
         self.declare_parameter('image_format', 'png')
         self.declare_parameter('log_rate_hz', 10.0)
@@ -37,7 +42,7 @@ class DataLoggerNode(Node):
         self.log_rate_hz = float(self.get_parameter('log_rate_hz').value)
 
         if run_name == '':
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            timestamp = datetime.now().strftime('%m_%d_%H_%M')
             run_name = f'dataset_run_{timestamp}'
 
         self.run_dir = dataset_root / run_name
@@ -52,9 +57,6 @@ class DataLoggerNode(Node):
 
         self._make_dirs()
 
-        # -----------------------------
-        # Bookkeeping
-        # -----------------------------
         self.bridge = CvBridge()
         self.sample_id = 0
         self.episode_id = 0
@@ -79,8 +81,6 @@ class DataLoggerNode(Node):
         self.latest_cmd_steer = None
         self.latest_cmd_brake = None
         self.latest_cmd_reverse = None
-        self.latest_cmd_hand_brake = None
-        self.latest_cmd_manual_gear_shift = None
         self.latest_cmd_gear = None
 
         # Control applied
@@ -88,13 +88,11 @@ class DataLoggerNode(Node):
         self.latest_applied_steer = None
         self.latest_applied_brake = None
         self.latest_applied_reverse = None
-        self.latest_applied_hand_brake = None
-        self.latest_applied_manual_gear_shift = None
         self.latest_applied_gear = None
 
         # Ego state
         self.latest_speed = None
-        self.latest_yaw = None
+        self.latest_yaw = None  
 
         self.latest_pose_x = None
         self.latest_pose_y = None
@@ -104,10 +102,15 @@ class DataLoggerNode(Node):
         self.latest_ori_z = None
         self.latest_ori_w = None
 
+        # Goal-relative errors
+        self.yaw_error = None
+        self.position_error_x = None
+        self.position_error_y = None
+        self.goal_distance = None
+
         self.csv_path = self.records_dir / 'samples.csv'
         self._init_csv()
         self._write_metadata()
-
 
         self.create_subscription(Image, '/sensors/dalsa2_rgb/image_raw', self.dalsa2_cb, qos_profile_sensor_data)
         self.create_subscription(Image, '/sensors/leopard4_rgb/image_raw', self.leopard4_cb, qos_profile_sensor_data)
@@ -129,9 +132,7 @@ class DataLoggerNode(Node):
         self.create_subscription(Float32, '/ego/yaw', self.yaw_cb, 10)
         self.create_subscription(PoseStamped, '/ego/pose', self.pose_cb, 10)
         self.create_subscription(UInt32, '/episode/reset', self.episode_reset_cb, 10)
-        
 
- 
         period = 1.0 / self.log_rate_hz
         self.timer = self.create_timer(period, self.log_sample)
 
@@ -159,16 +160,12 @@ class DataLoggerNode(Node):
             'cmd_steer',
             'cmd_brake',
             'cmd_reverse',
-            'cmd_hand_brake',
-            'cmd_manual_gear_shift',
             'cmd_gear',
 
             'applied_throttle',
             'applied_steer',
             'applied_brake',
             'applied_reverse',
-            'applied_hand_brake',
-            'applied_manual_gear_shift',
             'applied_gear',
 
             'speed',
@@ -181,6 +178,14 @@ class DataLoggerNode(Node):
             'ori_y',
             'ori_z',
             'ori_w',
+
+            'goal_x',
+            'goal_y',
+            'goal_yaw',
+            'goal_rel_x',
+            'goal_rel_y',
+            'goal_distance',
+            'goal_yaw_error',
 
             'laser1_distance',
             'laser2_distance',
@@ -214,21 +219,31 @@ class DataLoggerNode(Node):
             'created_at': datetime.now().isoformat(),
             'image_format': self.image_format,
             'log_rate_hz': self.log_rate_hz,
+            'ego_yaw_unit': 'degrees',
+            'ego_yaw_range': '[-180, 180]',
+            'goal_pose_world': {
+                'x': CARGOBOX_COORDINATES[0],
+                'y': CARGOBOX_COORDINATES[1],
+                'yaw_degrees': CARGOBOX_COORDINATES[2],
+            }
         }
 
         schema = {
             'control_cmd': [
-                'cmd_throttle', 'cmd_steer', 'cmd_brake', 'cmd_reverse',
-                'cmd_hand_brake', 'cmd_manual_gear_shift', 'cmd_gear'
+                'cmd_throttle', 'cmd_steer', 'cmd_brake', 'cmd_reverse', 'cmd_gear'
             ],
             'control_applied': [
-                'applied_throttle', 'applied_steer', 'applied_brake', 'applied_reverse',
-                'applied_hand_brake', 'applied_manual_gear_shift', 'applied_gear'
+                'applied_throttle', 'applied_steer', 'applied_brake', 'applied_reverse', 'applied_gear'
             ],
             'vehicle_state': [
                 'speed', 'yaw',
                 'pose_x', 'pose_y', 'pose_z',
                 'ori_x', 'ori_y', 'ori_z', 'ori_w'
+            ],
+            'goal_relative': [
+                'goal_x', 'goal_y', 'goal_yaw',
+                'goal_rel_x', 'goal_rel_y',
+                'goal_distance', 'goal_yaw_error'
             ],
             'lasers': [
                 'laser1_distance', 'laser2_distance', 'laser3_distance', 'laser4_distance'
@@ -248,6 +263,43 @@ class DataLoggerNode(Node):
 
         with open(self.metadata_dir / 'schema.json', 'w') as f:
             json.dump(schema, f, indent=2)
+
+    # =========================================================
+    # Utility
+    # =========================================================
+    def wrap_to_pi(self, angle_rad: float) -> float:
+        return (angle_rad + np.pi) % (2.0 * np.pi) - np.pi
+
+    def current_yaw_rad(self):
+        if self.latest_yaw is None:
+            return None
+        return np.deg2rad(self.latest_yaw)
+
+    def goal_yaw_rad(self):
+        return np.deg2rad(CARGOBOX_COORDINATES[2])
+
+    def compute_goal_relative(self):
+        if self.latest_pose_x is None or self.latest_pose_y is None or self.latest_yaw is None:
+            return None, None, None, None
+
+        goal_x, goal_y, _ = CARGOBOX_COORDINATES
+
+        dx_world = goal_x - self.latest_pose_x
+        dy_world = goal_y - self.latest_pose_y
+
+        yaw = self.current_yaw_rad()
+        if yaw is None:
+            return None, None, None, None
+
+        # Transform goal from world frame into ego frame
+        goal_rel_x = np.cos(yaw) * dx_world + np.sin(yaw) * dy_world
+        goal_rel_y = -np.sin(yaw) * dx_world + np.cos(yaw) * dy_world
+        goal_distance = float(np.hypot(goal_rel_x, goal_rel_y))
+
+        goal_yaw = self.goal_yaw_rad()
+        goal_yaw_error = float(self.wrap_to_pi(goal_yaw - yaw))
+
+        return float(goal_rel_x), float(goal_rel_y), goal_distance, goal_yaw_error
 
     # =========================================================
     # Callbacks
@@ -304,8 +356,6 @@ class DataLoggerNode(Node):
         self.latest_cmd_steer = float(msg.steer)
         self.latest_cmd_brake = float(msg.brake)
         self.latest_cmd_reverse = int(msg.reverse)
-        self.latest_cmd_hand_brake = int(msg.hand_brake)
-        self.latest_cmd_manual_gear_shift = int(msg.manual_gear_shift)
         self.latest_cmd_gear = int(msg.gear)
 
     def control_applied_cb(self, msg: VehicleControl):
@@ -313,8 +363,6 @@ class DataLoggerNode(Node):
         self.latest_applied_steer = float(msg.steer)
         self.latest_applied_brake = float(msg.brake)
         self.latest_applied_reverse = int(msg.reverse)
-        self.latest_applied_hand_brake = int(msg.hand_brake)
-        self.latest_applied_manual_gear_shift = int(msg.manual_gear_shift)
         self.latest_applied_gear = int(msg.gear)
 
     def speed_cb(self, msg: Float32):
@@ -332,22 +380,29 @@ class DataLoggerNode(Node):
         self.latest_ori_y = float(msg.pose.orientation.y)
         self.latest_ori_z = float(msg.pose.orientation.z)
         self.latest_ori_w = float(msg.pose.orientation.w)
-    
+
     def episode_reset_cb(self, msg: UInt32):
         self.episode_id = int(msg.data)
+        self.sample_id = 0
         self.get_logger().info(f'Received new episode_id={self.episode_id}')
 
     # =========================================================
     # Saving helpers
     # =========================================================
+    def make_sensor_stem(self, sample_id: int) -> str:
+        return f'ep{self.episode_id:04d}_{sample_id:06d}'
+
     def save_image(self, img, directory: Path, sample_id: int):
-        rel_path = Path('sensors') / directory.name / f'{sample_id:06d}.{self.image_format}'
+        img_resized = cv2.resize(img, IMG_RESIZE, interpolation=cv2.INTER_AREA)
+        stem = self.make_sensor_stem(sample_id)
+        rel_path = Path('sensors') / directory.name / f'{stem}.{self.image_format}'
         abs_path = self.run_dir / rel_path
-        cv2.imwrite(str(abs_path), img)
+        cv2.imwrite(str(abs_path), img_resized)
         return str(rel_path)
 
     def save_lidar(self, xyz: np.ndarray, directory: Path, sample_id: int):
-        rel_path = Path('sensors') / directory.name / f'{sample_id:06d}.npy'
+        stem = self.make_sensor_stem(sample_id)
+        rel_path = Path('sensors') / directory.name / f'{stem}.npy'
         abs_path = self.run_dir / rel_path
         np.save(abs_path, xyz)
         return str(rel_path)
@@ -357,9 +412,10 @@ class DataLoggerNode(Node):
             writer = csv.writer(f)
             writer.writerow(row)
 
-
+    # =========================================================
+    # Main logging
+    # =========================================================
     def log_sample(self):
-        # Minimal requirement
         if self.latest_dalsa2 is None:
             return
         if self.latest_seyond6_xyz is None:
@@ -368,6 +424,13 @@ class DataLoggerNode(Node):
             return
 
         now = self.get_clock().now().to_msg()
+
+        goal_rel_x, goal_rel_y, goal_distance, goal_yaw_error = self.compute_goal_relative()
+
+        self.position_error_x = goal_rel_x
+        self.position_error_y = goal_rel_y
+        self.goal_distance = goal_distance
+        self.yaw_error = goal_yaw_error
 
         dalsa2_path = self.save_image(self.latest_dalsa2, self.dalsa2_dir, self.sample_id)
 
@@ -416,16 +479,12 @@ class DataLoggerNode(Node):
             self.latest_cmd_steer if self.latest_cmd_steer is not None else 0.0,
             self.latest_cmd_brake if self.latest_cmd_brake is not None else 0.0,
             self.latest_cmd_reverse if self.latest_cmd_reverse is not None else 0,
-            self.latest_cmd_hand_brake if self.latest_cmd_hand_brake is not None else 0,
-            self.latest_cmd_manual_gear_shift if self.latest_cmd_manual_gear_shift is not None else 0,
             self.latest_cmd_gear if self.latest_cmd_gear is not None else 0,
 
             self.latest_applied_throttle if self.latest_applied_throttle is not None else 0.0,
             self.latest_applied_steer if self.latest_applied_steer is not None else 0.0,
             self.latest_applied_brake if self.latest_applied_brake is not None else 0.0,
             self.latest_applied_reverse if self.latest_applied_reverse is not None else 0,
-            self.latest_applied_hand_brake if self.latest_applied_hand_brake is not None else 0,
-            self.latest_applied_manual_gear_shift if self.latest_applied_manual_gear_shift is not None else 0,
             self.latest_applied_gear if self.latest_applied_gear is not None else 0,
 
             self.latest_speed if self.latest_speed is not None else 0.0,
@@ -438,6 +497,14 @@ class DataLoggerNode(Node):
             self.latest_ori_y if self.latest_ori_y is not None else 0.0,
             self.latest_ori_z if self.latest_ori_z is not None else 0.0,
             self.latest_ori_w if self.latest_ori_w is not None else 1.0,
+
+            CARGOBOX_COORDINATES[0],
+            CARGOBOX_COORDINATES[1],
+            CARGOBOX_COORDINATES[2],
+            goal_rel_x if goal_rel_x is not None else 0.0,
+            goal_rel_y if goal_rel_y is not None else 0.0,
+            goal_distance if goal_distance is not None else 0.0,
+            goal_yaw_error if goal_yaw_error is not None else 0.0,
 
             self.latest_laser1 if self.latest_laser1 is not None else 0.0,
             self.latest_laser2 if self.latest_laser2 is not None else 0.0,

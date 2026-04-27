@@ -39,15 +39,14 @@ COM_OFFSET = -0.4
 URDF_OFFSET_X = 0.33
 URDF_OFFSET_Z = 0.4
 
-
 # ARCH SPAWN PARAMETERS
-ARCH_SPAWN_FLAG = True
+ARCH_SPAWN_FLAG = False
 CARGOBOX_COORDINATES = (290.9, -201.03)
-MIN_RAD= 7
+MIN_RAD= 8
 MAX_RAD= 15
-MIN_ANG= -30
-MAX_ANG= 30
-MAX_YAW = 15
+MIN_ANG= -15
+MAX_ANG= 15
+MAX_YAW = 10
 
 SENSOR_LAYOUT = {
 
@@ -290,7 +289,6 @@ SENSOR_LAYOUT = {
 
 }
 
-
 class CarlaInterfaceNode(Node):
     def __init__(self):
         super().__init__('carla_interface_node')
@@ -379,22 +377,23 @@ class CarlaInterfaceNode(Node):
         else:
             self.debug_timer = None
 
-        ego_rate = float(self.get_parameter('ego_state_publish_rate').value)
-        sensor_rate = float(self.get_parameter('sensor_publish_rate').value)
+        # ego_rate = float(self.get_parameter('ego_state_publish_rate').value)
+        # sensor_rate = float(self.get_parameter('sensor_publish_rate').value)
 
-        self.ego_timer = self.create_timer(1.0 / ego_rate, self.publish_ego_state)
-        self.sensor_timer = self.create_timer(1.0 / sensor_rate, self.publish_sensor_data)
+        # self.ego_timer = self.create_timer(1.0 / ego_rate, self.publish_ego_state)
+        # self.sensor_timer = self.create_timer(1.0 / sensor_rate, self.publish_sensor_data)
+        self.sim_timer = self.create_timer(0.001, self.step_simulation) # Maybe change time
+        self.goal_reach_timer = self.create_timer(3, self.check_goal_and_reset)
 
         self.publish_status('carla_interface_node  init')
 
-        self.get_logger().info(f'Chosen sensor {list(self.get_parameter("chosen_sensors").value)}')
+        # self.get_logger().info(f'Chosen sensor {list(self.get_parameter("chosen_sensors").value)}')
 
         for sensor_name in self.sensor_publishers.keys():
             spec = SENSOR_LAYOUT[sensor_name]
             self.get_logger().info(
                 f'{sensor_name}: type={spec["type"]}, topic={spec["topic"]}, frame={spec["frame_id"]}'
             )
-
 
     def publish_status(self, text: str):
         self.get_logger().info(text)
@@ -416,6 +415,14 @@ class CarlaInterfaceNode(Node):
         self.client.set_timeout(timeout)
         self.world = self.client.get_world()
         self.bp_lib = self.world.get_blueprint_library()
+
+        settings = self.world.get_settings()
+        settings.synchronous_mode = True
+        settings.fixed_delta_seconds = 0.05
+        settings.substepping = True
+        settings.max_substep_delta_time = 0.01
+        settings.max_substeps = 10
+        self.world.apply_settings(settings)
 
         self.publish_status(f'connected at {host}:{port}')
 
@@ -476,7 +483,7 @@ class CarlaInterfaceNode(Node):
 
             self.sensor_types[sensor_name] = sensor_type
             self.sensor_frame_ids[sensor_name] = frame_id
-            self.sensor_queues[sensor_name] = queue.Queue(maxsize=5)
+            self.sensor_queues[sensor_name] = queue.Queue(maxsize=50)
 
             if sensor_type == 'sensor.camera.rgb':
                 pub = self.create_publisher(Image, topic, qos_profile_sensor_data)
@@ -523,6 +530,19 @@ class CarlaInterfaceNode(Node):
         self.get_logger().info('Received reset request')
         self.reset_episode()
 
+    def step_simulation(self):
+        if self.world is None or self.vehicle is None:
+            return
+
+        try:
+            self.world.tick()
+            self.publish_ego_state()
+            self.publish_sensor_data()   # old version
+
+
+            
+        except Exception as e:
+            self.get_logger().warn(f'step_simulation failed: {e}')
 
     def random_spawn_point(self, center, min_radius, max_radius,
                             start_angle=-15, end_angle= 15, max_yaw_deg = 15):
@@ -888,14 +908,17 @@ class CarlaInterfaceNode(Node):
             return
 
         q = self.sensor_queues[sensor_name]
-        try:
-            if q.full():
-                q.get_nowait()
-            q.put_nowait(data)
-        except Exception:
-            pass
 
-    def publish_sensor_data(self):
+        try:
+            q.put_nowait(data)
+        except queue.Full:
+            try:
+                q.get_nowait()
+                q.put_nowait(data)
+            except Exception:
+                pass
+
+    def publish_sensor_data(self): # not used temp
         for sensor_name, publisher in self.sensor_publishers.items():
             sensor_type = self.sensor_types[sensor_name]
             frame_id = self.sensor_frame_ids[sensor_name]
@@ -927,6 +950,34 @@ class CarlaInterfaceNode(Node):
 
             elif sensor_type == 'sensor.other.imu':
                 msg = self.carla_imu_to_ros_imu(latest, frame_id)
+                publisher.publish(msg)
+
+    def publish_sensor_data_for_frame(self, frame: int):
+        for sensor_name, publisher in self.sensor_publishers.items():
+            sensor_type = self.sensor_types[sensor_name]
+            frame_id = self.sensor_frame_ids[sensor_name]
+
+            data = self.get_sensor_data_for_frame(sensor_name, frame, timeout=1.0)
+            if data is None:
+                self.get_logger().warn(f'No data for {sensor_name} at frame {frame}')
+                continue
+
+            if sensor_type == 'sensor.camera.rgb':
+                msg = self.carla_image_to_ros_image(data, frame_id)
+                publisher.publish(msg)
+
+            elif sensor_type == 'sensor.lidar.ray_cast':
+                msg = self.carla_lidar_to_pointcloud2(data, frame_id)
+                publisher.publish(msg)
+
+                if sensor_name in self.laser_distance_publishers:
+                    dist = self.lidar_to_distance(data)
+                    dist_msg = Float32()
+                    dist_msg.data = float(dist)
+                    self.laser_distance_publishers[sensor_name].publish(dist_msg)
+
+            elif sensor_type == 'sensor.other.imu':
+                msg = self.carla_imu_to_ros_imu(data, frame_id)
                 publisher.publish(msg)
 
     def carla_image_to_ros_image(self, image: carla.Image, frame_id: str) -> Image:
@@ -979,7 +1030,12 @@ class CarlaInterfaceNode(Node):
 
         tf = self.vehicle.get_transform()
         vel = self.vehicle.get_velocity()
-        speed = math.sqrt(vel.x ** 2 + vel.y ** 2 + vel.z ** 2)
+        yaw_rad = math.radians(tf.rotation.yaw)
+
+        forward_x = math.cos(yaw_rad)
+        forward_y = math.sin(yaw_rad)
+
+        speed = vel.x * forward_x + vel.y * forward_y
 
         pose_msg = PoseStamped()
         pose_msg.header.stamp = self.get_clock().now().to_msg()
@@ -1015,6 +1071,33 @@ class CarlaInterfaceNode(Node):
             ctrl_msg.gear = int(ctrl.gear)
             self.control_applied_pub.publish(ctrl_msg)
 
+    def get_sensor_data_for_frame(self, sensor_name: str, target_frame: int, timeout=1.0):
+        q = self.sensor_queues[sensor_name]
+        deadline = time.time() + timeout
+
+        while time.time() < deadline:
+            remaining = max(0.0, deadline - time.time())
+            try:
+                data = q.get(timeout=remaining)
+            except queue.Empty:
+                return None
+
+            if data.frame == target_frame:
+                return data
+
+            # discard older frames
+            if data.frame < target_frame:
+                continue
+
+            # if somehow we got a future frame, return it or warn
+            if data.frame > target_frame:
+                self.get_logger().warn(
+                    f'{sensor_name}: got future frame {data.frame}, expected {target_frame}'
+                )
+                return data
+
+        return None
+    
     def yaw_to_quaternion(self, yaw_deg: float):
         yaw = math.radians(yaw_deg)
         qx = 0.0
@@ -1210,8 +1293,6 @@ def main(args=None):
                 rclpy.shutdown()
         except Exception:
             pass
-
-
 
 if __name__ == '__main__':
     main()
