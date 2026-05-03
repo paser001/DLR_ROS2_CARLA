@@ -12,6 +12,12 @@ import timm
 import csv
 import json
 
+from pathlib import Path
+import cv2
+import numpy as np
+import pandas as pd
+from torch.utils.data import Dataset, DataLoader, random_split
+
 
 
 
@@ -281,6 +287,126 @@ class DockingNet(nn.Module):
 
 
 
+
+# ============================================================
+# Dataset
+# ============================================================
+
+class CarlaDockingDataset(Dataset):
+    def __init__(
+        self,
+        run_dir: str,
+        image_size: Tuple[int, int] = (224, 224),
+        lidar_bev_size: Tuple[int, int] = (128, 128),
+    ):
+        self.run_dir = Path(run_dir)
+        self.csv_path = self.run_dir / "records" / "samples.csv"
+
+        self.df = pd.read_csv(self.csv_path)
+        self.df = self.df.reset_index(drop=True)
+
+        self.image_size = image_size
+        self.lidar_bev_size = lidar_bev_size
+
+    def __len__(self):
+        return len(self.df)
+
+    def load_image(self, rel_path: str) -> torch.Tensor:
+        img_path = self.run_dir / rel_path
+
+        img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+        if img is None:
+            raise FileNotFoundError(f"Could not read image: {img_path}")
+
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, self.image_size)
+
+        img = img.astype(np.float32) / 255.0
+
+        # ImageNet normalization for pretrained ResNet
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        img = (img - mean) / std
+
+        # HWC -> CHW
+        img = np.transpose(img, (2, 0, 1))
+
+        return torch.tensor(img, dtype=torch.float32)
+
+    def load_lidar_bev(self, rel_path: str) -> torch.Tensor:
+        """
+        Temporary simple BEV occupancy map.
+
+        Later replace this with real PointPillars preprocessing.
+        """
+        lidar_path = self.run_dir / rel_path
+        points = np.load(lidar_path)  # expected shape: (N, 3)
+
+        H, W = self.lidar_bev_size
+        bev = np.zeros((H, W), dtype=np.float32)
+
+        if points.shape[0] > 0:
+            x = points[:, 0]
+            y = points[:, 1]
+
+            # TODO: tune these to your actual LiDAR coordinate frame
+            x_min, x_max = -10.0, 10.0
+            y_min, y_max = -10.0, 10.0
+
+            valid = (x >= x_min) & (x <= x_max) & (y >= y_min) & (y <= y_max)
+            x = x[valid]
+            y = y[valid]
+
+            if x.shape[0] > 0:
+                ix = ((x - x_min) / (x_max - x_min) * (W - 1)).astype(np.int32)
+                iy = ((y - y_min) / (y_max - y_min) * (H - 1)).astype(np.int32)
+
+                ix = np.clip(ix, 0, W - 1)
+                iy = np.clip(iy, 0, H - 1)
+
+                bev[iy, ix] = 1.0
+
+        # add channel dimension: (1, H, W)
+        bev = bev[None, :, :]
+
+        return torch.tensor(bev, dtype=torch.float32)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        row = self.df.iloc[idx]
+
+        img_center = self.load_image(row["dalsa2_rgb_path"])
+        img_left = self.load_image(row["leopard4_rgb_path"])
+        img_right = self.load_image(row["leopard5_rgb_path"])
+
+        lidar_bev = self.load_lidar_bev(row["seyond6_lidar_path"])
+
+        state_vec = torch.tensor([
+            row["speed"],
+            row["applied_steer"],
+            row["goal_rel_x"],
+            row["goal_rel_y"],
+            row["goal_yaw_error"],
+            row["laser1_distance"],
+            row["laser2_distance"],
+            row["laser3_distance"],
+            row["laser4_distance"],
+        ], dtype=torch.float32)
+
+        target_steering = torch.tensor([row["applied_steer"]], dtype=torch.float32)
+        target_speed = torch.tensor([row["speed"]], dtype=torch.float32)
+
+        return {
+            "img_left": img_left,
+            "img_center": img_center,
+            "img_right": img_right,
+            "lidar_bev": lidar_bev,
+            "state_vec": state_vec,
+            "target_steering": target_steering,
+            "target_speed": target_speed,
+        }
+
+
+
 def control_loss(
     pred: Dict[str, torch.Tensor],
     target_steering: torch.Tensor,
@@ -291,68 +417,111 @@ def control_loss(
     return loss_steer + loss_speed
 
 
-# ============================================================
-#  Batch Builder
-# ============================================================
 
-def make_dummy_batch(
-    batch_size: int = 2,
-    image_size: Tuple[int, int] = (224, 224),
-    bev_size: Tuple[int, int] = (128, 128),
-    state_dim: int = 9,
-    device: str = "cpu",
+def move_batch_to_device(
+    batch: Dict[str, torch.Tensor],
+    device: torch.device,
 ) -> Dict[str, torch.Tensor]:
-    """
-    State vector order:
-        [speed, applied_steer, goal_rel_x, goal_rel_y, goal_yaw_error,
-         laser1, laser2, laser3, laser4]
-    """
-    h, w = image_size
-    bh, bw = bev_size
-
-    batch = {
-        "img_left": torch.randn(batch_size, 3, h, w, device=device),
-        "img_center": torch.randn(batch_size, 3, h, w, device=device),
-        "img_right": torch.randn(batch_size, 3, h, w, device=device),
-        "lidar_bev": torch.randn(batch_size, 1, bh, bw, device=device),
-        "state_vec": torch.randn(batch_size, state_dim, device=device),
-        "target_steering": torch.randn(batch_size, 1, device=device).clamp(-1.0, 1.0),
-        "target_speed": torch.randn(batch_size, 1, device=device).clamp(-1.0, 1.0),
-    }
-    return batch
+    return {k: v.to(device) for k, v in batch.items()}
 
 
-
-def train_step(
+def train_one_epoch(
     model: DockingNet,
     optimizer: torch.optim.Optimizer,
-    batch: Dict[str, torch.Tensor],
+    dataloader: DataLoader,
+    device: torch.device,
 ) -> float:
     model.train()
-    optimizer.zero_grad()
+    total_loss = 0.0
 
-    pred = model(
-        img_left=batch["img_left"],
-        img_center=batch["img_center"],
-        img_right=batch["img_right"],
-        lidar_bev=batch["lidar_bev"],
-        state_vec=batch["state_vec"],
-    )
+    for batch in dataloader:
+        batch = move_batch_to_device(batch, device)
 
-    loss = control_loss(
-        pred=pred,
-        target_steering=batch["target_steering"],
-        target_speed=batch["target_speed"],
-    )
+        optimizer.zero_grad()
 
-    loss.backward()
-    optimizer.step()
-    return float(loss.item())
+        pred = model(
+            img_left=batch["img_left"],
+            img_center=batch["img_center"],
+            img_right=batch["img_right"],
+            lidar_bev=batch["lidar_bev"],
+            state_vec=batch["state_vec"],
+        )
+
+        loss = control_loss(
+            pred=pred,
+            target_steering=batch["target_steering"],
+            target_speed=batch["target_speed"],
+        )
+
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    return total_loss / len(dataloader)
+
+
+@torch.no_grad()
+def validate(
+    model: DockingNet,
+    dataloader: DataLoader,
+    device: torch.device,
+) -> float:
+    model.eval()
+    total_loss = 0.0
+
+    for batch in dataloader:
+        batch = move_batch_to_device(batch, device)
+
+        pred = model(
+            img_left=batch["img_left"],
+            img_center=batch["img_center"],
+            img_right=batch["img_right"],
+            lidar_bev=batch["lidar_bev"],
+            state_vec=batch["state_vec"],
+        )
+
+        loss = control_loss(
+            pred=pred,
+            target_steering=batch["target_steering"],
+            target_speed=batch["target_speed"],
+        )
+
+        total_loss += loss.item()
+
+    return total_loss / len(dataloader)
+
+
+def save_checkpoint(
+    path: str,
+    model: DockingNet,
+    optimizer: torch.optim.Optimizer,
+    cfg: ModelConfig,
+    epoch: int,
+    train_loss: float,
+    val_loss: float,
+):
+    torch.save({
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "config": cfg,
+        "train_loss": train_loss,
+        "val_loss": val_loss,
+    }, path)
 
 
 
 def main() -> None:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    run_dir = "/data/carla_datasets/dataset_run_04_27_15_09"
+
+    batch_size = 8
+    num_epochs = 30
+    learning_rate = 1e-4
+    val_split = 0.2
 
     cfg = ModelConfig(
         image_backbone="resnet34",
@@ -367,35 +536,92 @@ def main() -> None:
         output_dim=2,
     )
 
-    model = DockingNet(cfg).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-
-    batch = make_dummy_batch(
-        batch_size=4,
+    dataset = CarlaDockingDataset(
+        run_dir=run_dir,
         image_size=(224, 224),
-        bev_size=(128, 128),
-        state_dim=cfg.state_dim,
-        device=device,
+        lidar_bev_size=(128, 128),
     )
 
-    loss_value = train_step(model, optimizer, batch)
-    print(f"train loss: {loss_value:.4f}")
+    num_val = int(len(dataset) * val_split)
+    num_train = len(dataset) - num_val
 
-    model.eval()
-    with torch.no_grad():
-        pred = model(
-            img_left=batch["img_left"],
-            img_center=batch["img_center"],
-            img_right=batch["img_right"],
-            lidar_bev=batch["lidar_bev"],
-            state_vec=batch["state_vec"],
+    train_dataset, val_dataset = random_split(
+        dataset,
+        [num_train, num_val],
+        generator=torch.Generator().manual_seed(42),
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
+    )
+
+    model = DockingNet(cfg).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    best_val_loss = float("inf")
+
+    checkpoint_dir = Path("checkpoints")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    for epoch in range(num_epochs):
+        train_loss = train_one_epoch(
+            model=model,
+            optimizer=optimizer,
+            dataloader=train_loader,
+            device=device,
         )
 
-    print("steering shape:", pred["steering"].shape)
-    print("speed shape:", pred["speed"].shape)
-    print("fused feature shape:", pred["fused_feat"].shape)
+        val_loss = validate(
+            model=model,
+            dataloader=val_loader,
+            device=device,
+        )
+
+        print(
+            f"Epoch [{epoch + 1}/{num_epochs}] "
+            f"Train Loss: {train_loss:.6f} | "
+            f"Val Loss: {val_loss:.6f}"
+        )
+
+        save_checkpoint(
+            path=str(checkpoint_dir / "latest.pt"),
+            model=model,
+            optimizer=optimizer,
+            cfg=cfg,
+            epoch=epoch,
+            train_loss=train_loss,
+            val_loss=val_loss,
+        )
+
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_checkpoint(
+                path=str(checkpoint_dir / "best.pt"),
+                model=model,
+                optimizer=optimizer,
+                cfg=cfg,
+                epoch=epoch,
+                train_loss=train_loss,
+                val_loss=val_loss,
+            )
+            print(f"Saved new best model with val loss {best_val_loss:.6f}")
+
+    print("Training finished.")
+    print(f"Best validation loss: {best_val_loss:.6f}")
 
 
 if __name__ == "__main__":
     main()
-

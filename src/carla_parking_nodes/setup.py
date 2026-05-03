@@ -30,7 +30,8 @@ setup(
             'keyboard_control_node = carla_parking_nodes.keyboard_control_node:main',
             'parking_controller_node = carla_parking_nodes.parking_controller_node:main',
             'joystick_control_node = carla_parking_nodes.joystick_control_node:main',
-            'data_logger_node = carla_parking_nodes.data_logger_node:main'
+            'data_logger_node = carla_parking_nodes.data_logger_node:main',
+            'geometric_controller_node = carla_parking_nodes.geometric_controller_node:main',
         ],
     },
 )

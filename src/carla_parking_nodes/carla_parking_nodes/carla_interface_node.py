@@ -7,6 +7,14 @@ import random
 import numpy as np
 import carla
 import time
+import carla
+
+# For the logger
+import csv
+import json
+from pathlib import Path
+from datetime import datetime
+import cv2
 
 import rclpy
 from rclpy.node import Node
@@ -21,6 +29,7 @@ from cv_bridge import CvBridge
 from carla_parking_msgs.msg import VehicleControl
 
 SENSOR_DEBUG_FLAG = False
+DATA_LOGGER_FLAG = False
 
 #VEHICLE CONSTANTS
 MAX_THROTTLE = 0.45
@@ -351,14 +360,14 @@ class CarlaInterfaceNode(Node):
         self.declare_parameter(
             'chosen_sensors',
             [
-                'seyond6',
-                'leopard4',
-                'leopard5',
-                'dalsa2',
-                'laser1',
-                'laser2',
-                'laser3',
-                'laser4',
+                # 'seyond6',
+                # 'leopard4',
+                # 'leopard5',
+                # 'dalsa2',
+                # 'laser1',
+                # 'laser2',
+                # 'laser3',
+                # 'laser4',
                 'imu',
             ]
         )
@@ -366,11 +375,24 @@ class CarlaInterfaceNode(Node):
         self.declare_parameter('ego_state_publish_rate', 20.0)
         self.declare_parameter('sensor_publish_rate', 50.0)
 
+        self.declare_parameter('logger_flag', DATA_LOGGER_FLAG)  
+        self.declare_parameter('dataset_root', '/data/carla_datasets')
+        self.declare_parameter('run_name', '')
+        self.declare_parameter('image_format', 'png')
+        self.declare_parameter('log_rate_hz', 10.0)
+        self.declare_parameter('img_resize_w', 224)
+        self.declare_parameter('img_resize_h', 224)
+        self.latest = {} 
+
+        self.log_in_interface = bool(self.get_parameter('logger_flag').value)
+
         self.connect_to_carla()
         self.spawn_ego_vehicle()
         self.setup_dynamic_sensor_interfaces()
         self.spawn_sensors()
 
+        if self.log_in_interface:
+            self._init_dataset_writer()
 
         if bool(self.get_parameter('draw_sensor_debug').value):
             self.debug_timer = self.create_timer(0.1, self.debug_draw_loop)
@@ -383,7 +405,7 @@ class CarlaInterfaceNode(Node):
         # self.ego_timer = self.create_timer(1.0 / ego_rate, self.publish_ego_state)
         # self.sensor_timer = self.create_timer(1.0 / sensor_rate, self.publish_sensor_data)
         self.sim_timer = self.create_timer(0.001, self.step_simulation) # Maybe change time
-        self.goal_reach_timer = self.create_timer(3, self.check_goal_and_reset)
+        self.goal_reach_timer = self.create_timer(1.5, self.check_goal_and_reset)
 
         self.publish_status('carla_interface_node  init')
 
@@ -537,8 +559,11 @@ class CarlaInterfaceNode(Node):
         try:
             self.world.tick()
             self.publish_ego_state()
-            self.publish_sensor_data()   # old version
 
+            if not self.log_in_interface:
+                self.publish_sensor_data()
+            else:
+                self.log_sample_in_interface()
 
             
         except Exception as e:
@@ -908,7 +933,7 @@ class CarlaInterfaceNode(Node):
             return
 
         q = self.sensor_queues[sensor_name]
-
+        self.latest[sensor_name] = data
         try:
             q.put_nowait(data)
         except queue.Full:
@@ -1058,6 +1083,18 @@ class CarlaInterfaceNode(Node):
         yaw_msg = Float32()
         yaw_msg.data = float(tf.rotation.yaw)
         self.yaw_pub.publish(yaw_msg)
+       
+        # fl_deg = self.vehicle.get_wheel_steer_angle(carla.VehicleWheelLocation.FL_Wheel)
+        # fr_deg = self.vehicle.get_wheel_steer_angle(carla.VehicleWheelLocation.FR_Wheel)
+
+        # fl = math.radians(fl_deg)
+        # fr = math.radians(fr_deg)
+
+        # delta_eff = math.atan(0.5 * (math.tan(fl) + math.tan(fr)))
+
+        # self.get_logger().info(
+        #     f"FL={fl_deg:.2f}deg FR={fr_deg:.2f}deg eff={math.degrees(delta_eff):.2f}deg"
+        # )
 
         if self.control_applied_pub is not None:
             ctrl = self.vehicle.get_control()
@@ -1120,6 +1157,7 @@ class CarlaInterfaceNode(Node):
         ctrl.gear = int(msg.gear)
 
         self.vehicle.apply_control(ctrl)
+        self.last_cmd = msg
 
     def destroy_all_actors(self):
         try:
@@ -1175,7 +1213,7 @@ class CarlaInterfaceNode(Node):
 
         pos_tol = 1.5
         yaw_tol = 5.0
-        speed_tol = 0.3
+        speed_tol = 0.2
 
         vel = self.vehicle.get_velocity()
         speed = math.sqrt(vel.x ** 2 + vel.y ** 2 + vel.z ** 2)
@@ -1189,7 +1227,7 @@ class CarlaInterfaceNode(Node):
         reached = (
             pos_err < pos_tol and
             yaw_err < yaw_tol and
-            speed < speed_tol
+            abs(speed) < speed_tol
         )
 
         if reached and not self.goal_reached:
@@ -1249,6 +1287,7 @@ class CarlaInterfaceNode(Node):
             ))
 
             self.episode_id += 1
+            self.sample_id = 0
 
             msg = UInt32()
             msg.data = self.episode_id
@@ -1261,6 +1300,179 @@ class CarlaInterfaceNode(Node):
 
         except Exception as e:
             self.get_logger().error(f'reset_episode failed: {e}')
+
+    def _init_dataset_writer(self):
+        dataset_root = Path(self.get_parameter('dataset_root').value)
+        run_name = self.get_parameter('run_name').value
+        self.image_format = self.get_parameter('image_format').value
+        self.log_rate_hz = float(self.get_parameter('log_rate_hz').value)
+
+        w = int(self.get_parameter('img_resize_w').value)
+        h = int(self.get_parameter('img_resize_h').value)
+        self.img_resize = (w, h)
+
+        if run_name == '':
+            timestamp = datetime.now().strftime('%m_%d_%H_%M')
+            run_name = f'dataset_run_{timestamp}'
+
+        self.run_dir = dataset_root / run_name
+        self.metadata_dir = self.run_dir / 'metadata'
+        self.records_dir = self.run_dir / 'records'
+        self.sensors_dir = self.run_dir / 'sensors'
+
+        self.dalsa2_dir = self.sensors_dir / 'dalsa2_rgb'
+        self.leopard4_dir = self.sensors_dir / 'leopard4_rgb'
+        self.leopard5_dir = self.sensors_dir / 'leopard5_rgb'
+        self.seyond6_dir = self.sensors_dir / 'seyond6_lidar'
+
+        for d in [self.metadata_dir, self.records_dir, self.dalsa2_dir, self.leopard4_dir, self.leopard5_dir, self.seyond6_dir]:
+            d.mkdir(parents=True, exist_ok=True)
+
+        self.csv_path = self.records_dir / 'samples.csv'
+        self.sample_id = 0
+
+        self._init_csv_header()
+        self._write_metadata()
+
+        # to control logging rate inside the tick loop
+        self._log_period = 1.0 / max(self.log_rate_hz, 1e-6)
+        self._last_log_time = time.time()
+
+        self.get_logger().info(f'Logging inside CarlaInterfaceNode -> {self.run_dir}')
+
+    def _init_csv_header(self):
+        header = [
+            'sample_id', 'episode_id', 'timestamp_ros_sec', 'timestamp_ros_nanosec',
+            'cmd_throttle', 'cmd_steer', 'cmd_brake', 'cmd_reverse', 'cmd_gear',
+            'applied_throttle', 'applied_steer', 'applied_brake', 'applied_reverse', 'applied_gear',
+            'speed', 'yaw',
+            'pose_x', 'pose_y', 'pose_z',
+            'ori_x', 'ori_y', 'ori_z', 'ori_w',
+            'laser1_distance', 'laser2_distance', 'laser3_distance', 'laser4_distance',
+            'dalsa2_rgb_path', 'leopard4_rgb_path', 'leopard5_rgb_path', 'seyond6_lidar_path',
+        ]
+        with open(self.csv_path, 'w', newline='') as f:
+            csv.writer(f).writerow(header)
+
+    def _write_metadata(self):
+        run_info = {
+            'node_name': 'carla_interface_node',
+            'created_at': datetime.now().isoformat(),
+            'image_format': self.image_format,
+            'log_rate_hz': self.log_rate_hz,
+            'img_resize': list(self.img_resize),
+            'fixed_delta_seconds': float(self.world.get_settings().fixed_delta_seconds) if self.world else None,
+        }
+        with open(self.metadata_dir / 'run_info.json', 'w') as f:
+            json.dump(run_info, f, indent=2)
+
+    def _make_stem(self, sample_id: int) -> str:
+        return f'ep{self.episode_id:04d}_{sample_id:06d}'
+
+    def _save_image(self, img, directory: Path, sample_id: int):
+        img_resized = cv2.resize(img, self.img_resize, interpolation=cv2.INTER_AREA)
+        stem = self._make_stem(sample_id)
+        rel_path = Path('sensors') / directory.name / f'{stem}.{self.image_format}'
+        abs_path = self.run_dir / rel_path
+        cv2.imwrite(str(abs_path), img_resized)
+        return str(rel_path)
+
+    def _save_lidar(self, xyz: np.ndarray, directory: Path, sample_id: int):
+        stem = self._make_stem(sample_id)
+        rel_path = Path('sensors') / directory.name / f'{stem}.npy'
+        abs_path = self.run_dir / rel_path
+        np.save(abs_path, xyz)
+        return str(rel_path)
+
+    def _append_csv_row(self, row):
+        with open(self.csv_path, 'a', newline='') as f:
+            csv.writer(f).writerow(row)
+
+    def log_sample_in_interface(self):
+        # rate limit to log_rate_hz even if tick loop is faster
+        now_wall = time.time()
+        if now_wall - self._last_log_time < self._log_period:
+            return
+        self._last_log_time = now_wall
+
+        # minimal required sensors
+        dalsa2 = self.latest.get('dalsa2', None)
+        seyond6 = self.latest.get('seyond6', None)
+
+        if dalsa2 is None or seyond6 is None:
+            return
+
+        # Convert CARLA image to cv2 BGR (same logic you already use)
+        img = np.frombuffer(dalsa2.raw_data, dtype=np.uint8).reshape((dalsa2.height, dalsa2.width, 4))[:, :, :3]
+        dalsa2_path = self._save_image(img, self.dalsa2_dir, self.sample_id)
+
+        leopard4_path = ''
+        if 'leopard4' in self.latest:
+            d = self.latest['leopard4']
+            im = np.frombuffer(d.raw_data, dtype=np.uint8).reshape((d.height, d.width, 4))[:, :, :3]
+            leopard4_path = self._save_image(im, self.leopard4_dir, self.sample_id)
+
+        leopard5_path = ''
+        if 'leopard5' in self.latest:
+            d = self.latest['leopard5']
+            im = np.frombuffer(d.raw_data, dtype=np.uint8).reshape((d.height, d.width, 4))[:, :, :3]
+            leopard5_path = self._save_image(im, self.leopard5_dir, self.sample_id)
+
+        # lidar xyz
+        pts = np.frombuffer(seyond6.raw_data, dtype=np.float32).reshape(-1, 4)[:, :3]
+        seyond6_path = self._save_lidar(pts.astype(np.float32), self.seyond6_dir, self.sample_id)
+
+        # ego state / applied control
+        tf = self.vehicle.get_transform()
+        vel = self.vehicle.get_velocity()
+        yaw_rad = math.radians(tf.rotation.yaw)
+        speed = vel.x * math.cos(yaw_rad) + vel.y * math.sin(yaw_rad)
+
+        ctrl = self.vehicle.get_control()
+
+        ros_time = self.get_clock().now().to_msg()
+
+        # lasers: you were publishing distances from lidar lasers. For logging inside interface,
+        # easiest is to compute distance from the latest laser pointcloud
+        laser_d = {}
+        for lname in ['laser1', 'laser2', 'laser3', 'laser4']:
+            ld = self.latest.get(lname, None)
+            if ld is None:
+                laser_d[lname] = 0.0
+            else:
+                p = np.frombuffer(ld.raw_data, dtype=np.float32).reshape(-1, 4)
+                laser_d[lname] = float(np.min(np.linalg.norm(p[:, :3], axis=1))) if p.shape[0] > 0 else 12.0
+
+        # (optional) use last commanded msg stored from control_cmd_callback
+        cmd = getattr(self, 'last_cmd', None)
+
+        row = [
+            self.sample_id, self.episode_id, ros_time.sec, ros_time.nanosec,
+
+            float(cmd.throttle) if cmd else 0.0,
+            float(cmd.steer) if cmd else 0.0,
+            float(cmd.brake) if cmd else 0.0,
+            int(cmd.reverse) if cmd else 0,
+            int(cmd.gear) if cmd else 0,
+
+            float(ctrl.throttle), float(ctrl.steer), float(ctrl.brake),
+            int(ctrl.reverse), int(ctrl.gear),
+
+            float(speed), float(tf.rotation.yaw),
+
+            float(tf.location.x), float(tf.location.y), float(tf.location.z),
+            0.0, 0.0, math.sin(yaw_rad/2.0), math.cos(yaw_rad/2.0),
+
+            laser_d['laser1'], laser_d['laser2'], laser_d['laser3'], laser_d['laser4'],
+
+            dalsa2_path, leopard4_path, leopard5_path, seyond6_path
+        ]
+
+        self._append_csv_row(row)
+        self.sample_id += 1
+
+
+
 
 def main(args=None):
     rclpy.init(args=args)
