@@ -360,14 +360,14 @@ class CarlaInterfaceNode(Node):
         self.declare_parameter(
             'chosen_sensors',
             [
-                # 'seyond6',
-                # 'leopard4',
-                # 'leopard5',
-                # 'dalsa2',
-                # 'laser1',
-                # 'laser2',
-                # 'laser3',
-                # 'laser4',
+                'seyond6',
+                'leopard4',
+                'leopard5',
+                'dalsa2',
+                'laser1',
+                'laser2',
+                'laser3',
+                'laser4',
                 'imu',
             ]
         )
@@ -388,6 +388,7 @@ class CarlaInterfaceNode(Node):
 
         self.connect_to_carla()
         self.spawn_ego_vehicle()
+        self.print_wheel_positions()
         self.setup_dynamic_sensor_interfaces()
         self.spawn_sensors()
 
@@ -568,6 +569,25 @@ class CarlaInterfaceNode(Node):
             
         except Exception as e:
             self.get_logger().warn(f'step_simulation failed: {e}')
+
+    def print_wheel_positions(self):
+        physics = self.vehicle.get_physics_control()
+
+        tf = self.vehicle.get_transform()
+        self.get_logger().info(
+            f"ACTOR_ORIGIN world: x={tf.location.x:.3f}, "
+            f"y={tf.location.y:.3f}, z={tf.location.z:.3f}, "
+            f"yaw={tf.rotation.yaw:.2f} deg"
+        )
+
+        for i, wheel in enumerate(physics.wheels):
+            p = wheel.position
+
+            self.get_logger().info(
+                f"wheel[{i}] local: x={p.x:.3f}, y={p.y:.3f}, z={p.z:.3f}, "
+                f"max_steer_angle={wheel.max_steer_angle:.2f}, "
+                f"radius={wheel.radius:.2f}"
+            )
 
     def random_spawn_point(self, center, min_radius, max_radius,
                             start_angle=-15, end_angle= 15, max_yaw_deg = 15):
